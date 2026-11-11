@@ -5,33 +5,48 @@
 # cards rendered immediately before the existing "Current Cash Balance" card:
 #
 #   1. Total Sales Amount  — sales excluding VAT (net of refunds)
-#   2. Total VAT           — VAT collected from those sales
+#   2. Total VAT           — VAT collected from those same sales
 #
-# Sales figures are computed from *posted* accounting records only:
+# The KPIs are computed from actual POS sales transactions that are
+# associated with the cash balance — i.e. closed-session POS orders paying
+# into the same cash journals that back the "Current Cash Balance" card
+# (see _get_cash_journal_balance in kio_cash_deposit):
 #
-#   * Posted customer invoices / refunds (move_type out_invoice / out_refund).
-#     This covers regular invoicing and invoiced POS orders (their revenue
-#     lives on the out_invoice/out_refund, never on the POS session entry).
-#   * Posted POS session journal entries (account.move linked to a
-#     pos.session through move_id). Those entries only contain NON-invoiced
-#     orders, because invoiced orders are skipped when the session creates
-#     its accounting entry.
-#
-# Because of that split, an invoiced POS order is counted exactly once (in its
-# invoice) and a non-invoiced POS order is counted exactly once (in its
-# session entry) — POS orders and their invoices/journal entries are never
-# double counted.
+#   * eligible = pos.order with a closed session, state in
+#     ('paid', 'done', 'invoiced'), same company, and date_order up to the
+#     end of the current date in the company timezone. Nothing earlier is
+#     cut off — all history through today is included.
+#   * for each order, only the cash-paid portion is counted: the payments
+#     whose payment method points to one of the coverage cash journals.
+#   * mixed payments contribute pro-rata:
+#       cash_portion = cash_paid / order.amount_total
+#       sales       += cash_portion * (order.amount_total - order.amount_tax)
+#       vat         += cash_portion *  order.amount_tax
+#     amount_total / amount_tax are Odoo's own totals, so discounted lines,
+#     multiple VAT rates, tax-exempt products and refunds are handled
+#     transparently. Refund orders (negative total/payments) subtract.
+#   * bank, card, mobile banking (e.g. Bkash/Nagad), pay-later and other
+#     non-cash payments are excluded — they are never part of the cash
+#     balance population.
+#   * opening balances, cash in/out, transfers, deposits and expenses are
+#     not POS order payments, so they cannot contribute either.
+#   * POS orders are counted once through their own payments. Linked
+#     invoices (order.account_move) are never read for this calculation, so
+#     an invoiced POS order cannot be double counted. Current Cash Balance
+#     is deliberately left independent and is not assumed to equal
+#     Sales + VAT.
 #
 # Branch filter semantics mirror the existing dashboard behaviour:
-#   * admin with a branch selection  -> only the selected branches
-#     (POS session entries + POS-invoiced invoices of those sessions; non-POS
-#     invoices cannot be attributed to a branch and are excluded),
-#   * admin without a selection      -> company-wide,
+#   * admin with a branch selection  -> only those branches' cash journals,
+#   * admin without a selection      -> all company cash journals,
 #   * manager without branches       -> zeros (same as Current Cash Balance).
 # Company scoping always applies. Amounts are net (refunds subtract) and in
 # company currency.
 
-from odoo import api, models
+import pytz
+from datetime import datetime, time
+
+from odoo import api, fields, models
 
 
 class KioCashDeposit(models.Model):
@@ -61,87 +76,115 @@ class KioCashDeposit(models.Model):
         return data
 
     @api.model
-    def _get_sales_and_vat_kpis(self, selected_branches=None, is_admin=False):
-        """Return the (total_sales, total_vat) dashboard KPI pair.
+    def _get_kpi_tz_name(self):
+        # The company record carries no own timezone in v17, so fall back to
+        # the user's timezone (Asia/Dhaka in this installation), then UTC.
+        return (
+            self.env.company.partner_id.tz
+            or self.env.user.tz
+            or "UTC"
+        )
 
-        total_sales is the untaxed sales amount (VAT excluded) and total_vat
-        is the VAT collected on sales, both net of refunds, in company
-        currency, computed from posted accounting records only.
-        """
+    @api.model
+    def _get_kpi_end_of_today(self):
+        tz = pytz.timezone(self._get_kpi_tz_name())
+        now_utc = fields.Datetime.now()
+        now_local = pytz.utc.localize(now_utc).astimezone(tz)
+        end_local = tz.localize(datetime.combine(now_local.date(), time.max))
+        return end_local.astimezone(pytz.utc).replace(tzinfo=None)
+
+    @api.model
+    def _get_kpi_cash_journals(self, selected_branches=None, is_admin=False):
+        """Return the coverage cash journals for the KPI calculation."""
         company = self.env.company
         selected_branches = selected_branches if selected_branches is not None else (
             self.env["kio.cash.deposit.branch"]
         )
         if selected_branches:
-            branch_journals = selected_branches.mapped("branch_cash_account_id")
-            return self._compute_sales_and_vat(company, branch_journals=branch_journals)
+            journals = selected_branches.mapped("branch_cash_account_id")
+            return journals.filtered(
+                lambda journal: journal.type == "cash"
+                and journal.company_id == company
+            )
         if not is_admin:
             # Mirrors _get_cash_journal_balance: no branch, no figures.
-            return 0.0, 0.0
-        return self._compute_sales_and_vat(company)
-
-    @api.model
-    def _compute_sales_and_vat(self, company, branch_journals=None):
-        move_ids = self._get_sales_kpi_move_ids(company, branch_journals=branch_journals)
-        if not move_ids:
-            return 0.0, 0.0
-        line_model = self.env["account.move.line"].sudo()
-        base_domain = [
-            ("move_id", "in", move_ids),
-            ("parent_state", "=", "posted"),
-            ("display_type", "not in", ("line_section", "line_note")),
-        ]
-        sales = self._sum_signed_move_line_balance(
-            base_domain
-            + [
-                ("tax_repartition_line_id", "=", False),
-                ("account_id.account_type", "in", ("income", "income_other")),
-            ]
-        )
-        vat = self._sum_signed_move_line_balance(
-            base_domain + [("tax_repartition_line_id", "!=", False)]
-        )
-        return sales, vat
-
-    @api.model
-    def _sum_signed_move_line_balance(self, domain):
-        # Invoice/POS revenue and VAT lines carry negative (credit) balances,
-        # refunds carry positive (debit) balances, so negating the raw sum
-        # yields the net signed amount.
-        result = self.env["account.move.line"].sudo().read_group(
-            domain, ["balance:sum"], []
-        )
-        balance = result[0].get("balance", 0.0) if result else 0.0
-        return -(balance or 0.0)
-
-    @api.model
-    def _get_sales_kpi_move_ids(self, company, branch_journals=None):
-        """Posted moves that carry sales revenue/VAT for the KPIs."""
-        session_domain = [("company_id", "=", company.id)]
-        if branch_journals:
-            session_domain.append(("cash_journal_id", "in", branch_journals.ids))
-        sessions = self.env["pos.session"].sudo().search(session_domain)
-        # Session closing entries carry revenue/VAT of NON-invoiced orders.
-        session_moves = sessions.filtered("move_id").mapped("move_id").filtered(
-            lambda move: move.state == "posted"
-        )
-
-        invoice_domain = [
+            return self.env["account.journal"]
+        return self.env["account.journal"].sudo().search([
             ("company_id", "=", company.id),
-            ("state", "=", "posted"),
-            ("move_type", "in", ("out_invoice", "out_refund")),
-        ]
-        if branch_journals:
-            # Branch filter: only POS-invoiced invoices/refunds that belong to
-            # the selected branches are attributable to those branches.
-            pos_move_ids = [
-                order.account_move.id
-                for order in sessions.mapped("order_ids")
-                if order.account_move
-            ]
-            invoice_domain.append(("id", "in", pos_move_ids or [0]))
-        invoices = self.env["account.move"].sudo().search(invoice_domain)
-        # Session entries exclude invoiced orders, so an invoiced POS order is
-        # counted once through its invoice and a non-invoiced POS order once
-        # through its session entry — never double counted.
-        return list((session_moves | invoices).ids)
+            ("type", "=", "cash"),
+        ])
+
+    @api.model
+    def _get_eligible_pos_orders(self, company, end_of_today):
+        return self.env["pos.order"].sudo().search([
+            ("company_id", "=", company.id),
+            ("state", "in", ("paid", "done", "invoiced")),
+            ("session_id.state", "=", "closed"),
+            ("date_order", "<=", end_of_today),
+        ])
+
+    @api.model
+    def _sum_cash_payments_by_order(self, orders, cash_journals):
+        """Map order_id -> cash-paid amount for the given cash journals."""
+        if not orders:
+            return {}
+        grouped = self.env["pos.payment"].sudo().read_group(
+            [
+                ("pos_order_id", "in", orders.ids),
+                ("payment_method_id.journal_id", "in", cash_journals.ids),
+            ],
+            ["amount:sum"],
+            ["pos_order_id"],
+        )
+        cash_paid = {}
+        for row in grouped:
+            order_key = row.get("pos_order_id")
+            order_id = (
+                order_key[0]
+                if isinstance(order_key, (list, tuple))
+                else order_key
+            )
+            if order_id:
+                cash_paid[order_id] = row.get("amount", 0.0) or 0.0
+        return cash_paid
+
+    @api.model
+    def _get_sales_and_vat_kpis(self, selected_branches=None, is_admin=False):
+        """Return the (total_sales, total_vat) dashboard KPI pair.
+
+        total_sales is the tax-excluded sales amount and total_vat is the
+        VAT collected on the same sales, both net of refunds, in company
+        currency, and restricted to the cash-paid portion of closed-session
+        POS orders through today.
+        """
+        company = self.env.company
+        cash_journals = self._get_kpi_cash_journals(
+            selected_branches=selected_branches,
+            is_admin=is_admin,
+        )
+        if not cash_journals:
+            return 0.0, 0.0
+        orders = self._get_eligible_pos_orders(
+            company, self._get_kpi_end_of_today()
+        )
+        cash_paid_by_order = self._sum_cash_payments_by_order(
+            orders, cash_journals
+        )
+
+        total_sales = 0.0
+        total_vat = 0.0
+        for order in orders:
+            cash_paid = cash_paid_by_order.get(order.id, 0.0)
+            if not cash_paid:
+                # No cash-paid portion in this order -> contributes nothing.
+                continue
+            order_total = order.amount_total or 0.0
+            if order_total == 0.0:
+                # Zero-total order (e.g. fully settled with change only) —
+                # there is no meaningful portion to allocate.
+                continue
+            portion = cash_paid / order_total
+            order_tax = order.amount_tax or 0.0
+            total_sales += portion * (order_total - order_tax)
+            total_vat += portion * order_tax
+        return total_sales, total_vat

@@ -17,20 +17,28 @@ The extension is developed against `kio_cash_deposit` **without modifying it**:
 * **Backend** (`models/cash_deposit.py`) — `_inherit = "kio.cash.deposit"` and
   an override of `get_cash_deposit_dashboard_data()` that calls the base
   implementation (leaving `current_balance` and everything else untouched) and
-  adds `total_sales` / `total_vat` to the response. Aggregates are computed
-  from posted accounting records only:
+  adds `total_sales` / `total_vat` to the response. The KPIs are computed
+  from actual POS sales transactions that are associated with the cash
+  balance:
 
-  * posted `out_invoice` / `out_refund` (covers regular invoices and invoiced
-    POS orders), and
-  * posted POS session journal entries (`move_id` on `pos.session`, which
-    contain **non-invoiced** orders only).
-
-  Invoiced POS orders therefore contribute through their invoice and through
-  nothing else, while non-invoiced POS orders contribute through their
-  session entry — nothing is double counted. Revenue/VAT lines are identified
-  by `account_type in ('income', 'income_other')` with no
-  `tax_repartition_line_id` (sales) resp. by a set `tax_repartition_line_id`
-  (VAT). Refund move lines carry the mirror sign, so totals are net.
+  * eligible orders are POS orders in a **closed session**, with state in
+    `paid` / `done` / `invoiced`, in the current company and with
+    `date_order` up to the end of the current date in the company
+    timezone (all history through today is included),
+  * for each order only the **cash-paid portion** is counted: payments
+    whose payment method points to the same cash journals that back the
+    Current Cash Balance card (the selected branch's cash journal, or all
+    company cash journals for admins with no branch selection),
+  * mixed payments are allocated pro-rata (`cash_paid / amount_total`),
+  * `Total Sales Amount` = `Σ portion × (amount_total − amount_tax)` and
+    `Total VAT` = `Σ portion × amount_tax` — Odoo's own totals, so
+    discounts, multiple VAT rates, tax-exempt products and refunds (net
+    negative) are all handled. Bank, card, mobile banking, pay-later and
+    other non-cash payments are excluded. Opening balances, cash in/out,
+    transfers, deposits and expenses never contribute (they are not POS
+    order payments). Linked invoices are never read, so an invoiced POS
+    order cannot be double counted. Cash Balance and the KPIs are computed
+    independently.
 
 * **Company / branch / access rights** — the RPC keeps the base access
   check; company scoping always applies; amount computations use `sudo()`
@@ -49,10 +57,13 @@ The extension is developed against `kio_cash_deposit` **without modifying it**:
 
 ## Tests
 
-* Backend: `tests/test_sales_vat_kpis.py` (post_install) — KPI calculation,
-  VAT split, refunds, draft invoices excluded, POS session entries,
-  invoiced POS orders counted exactly once, branch filter scoping, manager
-  scoping and access rights.
+* Backend: `tests/test_sales_vat_kpis.py` (post_install) — KPI calculation
+  for cash-paid POS sales: cash-only orders, mixed cash/card allocation,
+  multiple VAT rates and tax-exempt sales, discounts, refunds (full and
+  partial), zero-total orders, open sessions excluded, historical orders
+  through today, opening cash balances/deposits/expenses ignored, branch
+  filter scoping, manager scoping, invoiced POS orders counted once, and
+  access rights.
 * Frontend: `static/tests/cash_deposit_kpi_tests.js` (QUnit) — card order,
   rendering of the three cards and zero-fallback of the KPI values.
 

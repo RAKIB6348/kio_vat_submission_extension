@@ -10,13 +10,14 @@
 Extends the KIO Cash Deposit dashboard (kio_cash_deposit) with two KPI
 cards rendered immediately before the existing "Current Cash Balance" card:
 
-* Total Sales Amount — posted sales excluding VAT (net of refunds)
-* Total VAT — VAT collected from those sales
+* Total Sales Amount (excluding VAT), computed from POS sales.
+* Total VAT, collected from those sales.
 
-Sales figures are derived from posted Odoo records (invoices/refunds and
-POS session journal entries), so invoiced POS orders and their invoices are
-never double counted. Cards honour the dashboard's company, branch filter
-and user access rights, and reuse the existing card design.
+Values are computed from actual POS sales transactions associated with the
+cash balance (closed-session POS orders, restricted to the cash-paid portion
+and net of refunds). Invoiced POS orders are never double counted. The same
+company, branch filter and access rights as the dashboard apply, and the
+existing card design is reused.
 """,
     "author": "Kendroo Limited",
     "website": "kendroo.io",
