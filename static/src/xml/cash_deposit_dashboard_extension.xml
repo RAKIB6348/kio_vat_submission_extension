@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="kio_vat_submission_extension_cash_deposit_dashboard_templates" xml:space="preserve">
+    <!--
+        Inserts the Total Sales Amount and Total VAT KPI cards immediately
+        before the existing Current Cash Balance card. Loaded after the
+        kio_cash_deposit dashboard template so the xpath can target it.
+        Card design, colors and spacing are inherited from the base
+        .kio-cash-deposit__balance-card / __balance-icon / __balance-body
+        classes.
+    -->
+    <t t-inherit="kio_cash_deposit.cash_deposit_dashboard" t-inherit-mode="extension">
+        <xpath expr="//aside[hasclass('kio-cash-deposit__balance-card')]" position="before">
+            <aside class="kio-cash-deposit__balance-card" aria-label="Total Sales Amount">
+                <div class="kio-cash-deposit__balance-icon bg-primary">
+                    <i class="fa fa-shopping-cart"/>
+                </div>
+                <div class="kio-cash-deposit__balance-body">
+                    <span>Total Sales Amount</span>
+                    <strong><t t-esc="this.formatCurrency(state.totalSales)"/></strong>
+                </div>
+            </aside>
+            <aside class="kio-cash-deposit__balance-card" aria-label="Total VAT">
+                <div class="kio-cash-deposit__balance-icon bg-primary">
+                    <i class="fa fa-percent"/>
+                </div>
+                <div class="kio-cash-deposit__balance-body">
+                    <span>Total VAT</span>
+                    <strong><t t-esc="this.formatCurrency(state.totalVat)"/></strong>
+                </div>
+            </aside>
+        </xpath>
+    </t>
+</templates>

@@ -1,0 +1,36 @@
+// KIO VAT Submission Extension
+// Keeps the three KPI cards (Total Sales Amount, Total VAT, Current Cash
+// Balance) in one horizontal row on desktop, wrapping responsively on
+// smaller screens. The base dashboard card look is reused unchanged.
+
+.kio-cash-deposit__hero {
+  grid-template-columns: minmax(0, 1fr) repeat(3, 300px);
+  gap: 24px;
+  align-items: start;
+}
+
+.kio-cash-deposit__balance-body {
+  padding: 0 16px;
+}
+
+@media (max-width: 1100px) {
+  .kio-cash-deposit__hero {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .kio-cash-deposit__hero .kio-cash-deposit__heading {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .kio-cash-deposit__hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .kio-cash-deposit__hero .kio-cash-deposit__heading {
+    grid-column: auto;
+  }
+}
