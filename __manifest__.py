@@ -5,7 +5,7 @@
     "category": "Accounting/Accounting",
     "summary": "Total Sales Amount and Total VAT KPI cards for the Cash Deposit dashboard",
     "description": """KIO VAT Submission Extension
-===========================
+===============================
 
 Extends the KIO Cash Deposit dashboard (kio_cash_deposit) with two KPI
 cards rendered immediately before the existing "Current Cash Balance" card:
