@@ -119,6 +119,12 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
   these fields.
 - The memo (`communication`) is set to `VAT Payment - <Branch Name>` and follows
   branch changes. The Outstanding VAT amount calculation is unchanged.
+- Both journal items of the generated settlement entry use the dynamic label
+  `VAT Payment - <Branch Name> - <DD/MM/YYYY>` (actual branch and payment
+  date), replacing Odoo's default `Vendor Payment ...` label. It is applied
+  while the move lines are built (before posting), remains on the posted entry,
+  and is limited to VAT payments created by this module; standard vendor and
+  customer payments keep their normal labels.
 - The **Recipient Bank Account** field is hidden in the VAT dashboard flow;
   normal customer/vendor payment forms keep Odoo's standard behaviour.
 

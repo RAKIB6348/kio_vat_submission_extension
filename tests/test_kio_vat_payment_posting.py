@@ -231,6 +231,44 @@ class TestKioVatPaymentPosting(TransactionCase):
             self._cash_balance(self.journal_a), before_cash - 1000.0, places=2
         )
 
+    def test_vat_journal_item_labels(self):
+        """Both settlement lines carry the dynamic VAT label, before/after posting."""
+        self._fund_vat(self.branch_a, 1000.0)
+        self._fund_cash(self.journal_a, 5000.0)
+        payment_date = fields.Date.from_string("2026-11-19")
+        expected = "VAT Payment - VAT Posting Branch A - 19/11/2026"
+
+        captured = {}
+        original_action_post = type(self.env["account.payment"]).action_post
+
+        def _capture_before_post(records):
+            captured["labels"] = list(records.move_id.line_ids.mapped("name"))
+            return original_action_post(records)
+
+        with patch.object(
+            type(self.env["account.payment"]), "action_post", _capture_before_post
+        ):
+            action = self._wizard(
+                self.branch_a, 250.0, payment_date=payment_date
+            ).action_create_payments()
+
+        # Labels are already in place on the move lines before posting.
+        self.assertEqual(captured["labels"], [expected, expected])
+        payment = self.env["account.payment"].browse(
+            action["params"]["payment_id"]
+        )
+        self.assertEqual(payment.date, payment_date)
+        self.assertEqual(len(payment.move_id.line_ids), 2)
+        self.assertEqual(
+            payment.move_id.line_ids.mapped("name"), [expected, expected]
+        )
+        # Posting must not alter the label.
+        self.assertEqual(payment.state, "posted")
+        self.assertEqual(payment.move_id.state, "posted")
+        self.assertEqual(
+            set(payment.move_id.line_ids.mapped("name")), {expected}
+        )
+
     def test_partial_vat_payment(self):
         self._fund_vat(self.branch_a, 1000.0)
         self._fund_cash(self.journal_a, 5000.0)
@@ -428,3 +466,8 @@ class TestKioVatPaymentPosting(TransactionCase):
         self.assertNotEqual(payment.destination_account_id, self.vat_account)
         self.assertEqual(payment.destination_account_id.account_type,
                          "liability_payable")
+        payment.action_post()
+        # Standard vendor payments keep the standard journal item labels.
+        for line in payment.move_id.line_ids:
+            self.assertTrue(line.name.startswith("Vendor Payment "))
+            self.assertNotIn("VAT Payment -", line.name)

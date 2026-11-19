@@ -165,6 +165,30 @@ class AccountPayment(models.Model):
         return super().action_draft()
 
     # ------------------------------------------------------------------
+    # VAT journal item labels
+    # ------------------------------------------------------------------
+    def _kio_vat_move_line_label(self):
+        """Label shared by both VAT settlement journal items."""
+        self.ensure_one()
+        date = self.date or fields.Date.context_today(self)
+        branch_name = self.kio_vat_branch_id.display_name or ""
+        return f"VAT Payment - {branch_name} - {date.strftime('%d/%m/%Y')}"
+
+    def _get_liquidity_aml_display_name_list(self):
+        """Use the VAT label on the cash/liquidity line before posting."""
+        self.ensure_one()
+        if self.is_kio_vat_payment and self.kio_vat_branch_id:
+            return [("label", self._kio_vat_move_line_label())]
+        return super()._get_liquidity_aml_display_name_list()
+
+    def _get_counterpart_aml_display_name_list(self):
+        """Use the VAT label on the counterpart (VAT Payable) line too."""
+        self.ensure_one()
+        if self.is_kio_vat_payment and self.kio_vat_branch_id:
+            return [("label", self._kio_vat_move_line_label())]
+        return super()._get_counterpart_aml_display_name_list()
+
+    # ------------------------------------------------------------------
     # Payment History (server-side scoping)
     # ------------------------------------------------------------------
     @api.model

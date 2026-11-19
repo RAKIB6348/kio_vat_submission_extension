@@ -56,7 +56,7 @@ No changes to `kio_cash_deposit`, Odoo core, accounting configuration, existing 
    - VAT Payable account 200904 present and valid for the company;
    - payment date does not violate company lock dates (`_get_violated_lock_dates`);
 3. Idempotency key = SHA-256 of `(company, branch, journal, amount, date, optional client key)`. Existing payment with that key is returned instead of creating a duplicate.
-4. `account.payment.create()` with one outbound payment: marker, branch, journal, method, amount, currency, date, memo (`VAT Payment - <Branch>`) and explicit `destination_account_id = 200904`. No partner is set (none is configured for the VAT authority).
+4. `account.payment.create()` with one outbound payment: marker, branch, journal, method, amount, currency, date, memo (`VAT Payment - <Branch>`) and explicit `destination_account_id = 200904`. No partner is set (none is configured for the VAT authority). Both generated journal items are labelled `VAT Payment - <Branch Name> - <DD/MM/YYYY>` through the standard liquidity/counterpart display-name hooks (before posting; standard payments are unaffected).
 5. `payment.action_post()` posts the single linked `account.move`.
 6. Verify: move posted, exactly two lines, debit 200904 and credit branch cash account, each equal to the amount, total balance zero. Any failure raises → Odoo rolls back the whole request, leaving no partial payment.
 7. Return a success notification whose `next` action is `ir.actions.act_window_close`: the Register Payment dialog closes and the user stays on the VAT Payment Dashboard. The dashboard's dialog `onClose` callback reloads KPIs, Branch-wise Summary and Payment History while preserving branch/date/search filters and the active tab.
