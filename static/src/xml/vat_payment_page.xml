@@ -1,19 +1,191 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <templates id="kio_vat_submission_extension_vat_payment_templates" xml:space="preserve">
     <t t-name="kio_vat_submission_extension.vat_payment_page">
-        <div class="kio-cash-deposit kio-vat-payment">
-            <main class="kio-cash-deposit__page">
-                <header class="kio-cash-deposit__hero">
-                    <div class="kio-cash-deposit__heading">
-                        <h1>VAT Payment</h1>
-                    </div>
+        <div class="kio-vat-payment">
+            <main class="kio-vat-payment__page">
+                <header class="kio-vat-payment__header">
+                    <h1 class="kio-vat-payment__title">VAT Payment</h1>
+                    <button type="button" class="kio-vat-payment__new-payment-btn" disabled="disabled" aria-disabled="true" title="New Payment (coming soon)">
+                        <i class="fa fa-plus"/>
+                        <span>New Payment</span>
+                    </button>
                 </header>
 
-                <section class="kio-cash-deposit__list-panel">
-                    <div class="kio-vat-payment__content">
-                        <p class="kio-vat-payment__placeholder">
-                            VAT Payment page
-                        </p>
+                <section class="kio-vat-payment__kpis" aria-label="VAT payment KPIs">
+                    <article
+                        t-foreach="kpiCards"
+                        t-as="card"
+                        t-key="card.key"
+                        t-attf-class="kio-vat-payment__kpi-card kio-vat-payment__kpi-card--{{ card.accent }}"
+                    >
+                        <div class="kio-vat-payment__kpi-icon-wrap">
+                            <span class="kio-vat-payment__kpi-icon">
+                                <i t-att-class="card.icon" aria-hidden="true"/>
+                            </span>
+                        </div>
+                        <div class="kio-vat-payment__kpi-body">
+                            <span class="kio-vat-payment__kpi-label"><t t-esc="card.label"/></span>
+                            <strong class="kio-vat-payment__kpi-value"><t t-esc="card.value"/></strong>
+                        </div>
+                    </article>
+                </section>
+
+                <section class="kio-vat-payment__panel kio-vat-payment__filters" aria-label="VAT payment filters">
+                    <div class="kio-vat-payment__filters-grid">
+                        <label class="kio-vat-payment__field">
+                            <span class="kio-vat-payment__field-label">Branch</span>
+                            <select
+                                class="kio-vat-payment__control"
+                                t-att-value="state.filters.branchId"
+                                t-on-change="(ev) => this.onFilterChange('branchId', ev)"
+                            >
+                                <option value="all">All Branches</option>
+                                <option t-foreach="state.branches" t-as="branch" t-key="branch.id" t-att-value="branch.id">
+                                    <t t-esc="branch.name"/>
+                                </option>
+                            </select>
+                        </label>
+
+                        <label class="kio-vat-payment__field">
+                            <span class="kio-vat-payment__field-label">Date From</span>
+                            <input
+                                type="date"
+                                class="kio-vat-payment__control"
+                                t-att-value="state.filters.dateFrom"
+                                t-on-input="(ev) => this.onFilterChange('dateFrom', ev)"
+                            />
+                        </label>
+
+                        <label class="kio-vat-payment__field">
+                            <span class="kio-vat-payment__field-label">Date To</span>
+                            <input
+                                type="date"
+                                class="kio-vat-payment__control"
+                                t-att-value="state.filters.dateTo"
+                                t-on-input="(ev) => this.onFilterChange('dateTo', ev)"
+                            />
+                        </label>
+
+                        <label class="kio-vat-payment__field kio-vat-payment__field--search">
+                            <span class="kio-vat-payment__field-label">Search</span>
+                            <div class="kio-vat-payment__search-wrap">
+                                <input
+                                    type="search"
+                                    class="kio-vat-payment__control kio-vat-payment__control--search"
+                                    placeholder="Search..."
+                                    t-att-value="state.filters.search"
+                                    t-on-input="(ev) => this.onFilterChange('search', ev)"
+                                />
+                                <i class="fa fa-search" aria-hidden="true"/>
+                            </div>
+                        </label>
+
+                        <div class="kio-vat-payment__field kio-vat-payment__field--actions">
+                            <span class="kio-vat-payment__field-label">&#160;</span>
+                            <button type="button" class="kio-vat-payment__reset-btn" t-on-click="resetFilters">
+                                <i class="fa fa-undo" aria-hidden="true"/>
+                                <span>Reset Filters</span>
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="kio-vat-payment__panel kio-vat-payment__tabs-panel" aria-label="VAT payment details">
+                    <div class="kio-vat-payment__tabs" role="tablist" aria-label="VAT payment tabs">
+                        <button
+                            type="button"
+                            role="tab"
+                            t-att-aria-selected="isActiveTab('branch') ? 'true' : 'false'"
+                            t-attf-class="kio-vat-payment__tab {{ isActiveTab('branch') ? 'is-active' : '' }}"
+                            t-on-click="() => this.setActiveTab('branch')"
+                        >
+                            Branch-wise Summary
+                        </button>
+                        <button
+                            type="button"
+                            role="tab"
+                            t-att-aria-selected="isActiveTab('history') ? 'true' : 'false'"
+                            t-attf-class="kio-vat-payment__tab {{ isActiveTab('history') ? 'is-active' : '' }}"
+                            t-on-click="() => this.setActiveTab('history')"
+                        >
+                            Payment History
+                        </button>
+                    </div>
+
+                    <div class="kio-vat-payment__tab-content" t-if="isActiveTab('branch')">
+                        <div class="kio-vat-payment__table-wrap">
+                            <table class="kio-vat-payment__table">
+                                <thead>
+                                    <tr>
+                                        <th>Branch</th>
+                                        <th class="is-money">Total VAT Payable</th>
+                                        <th class="is-money">Paid VAT</th>
+                                        <th class="is-money">Outstanding VAT</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr t-foreach="branchSummaryRows" t-as="row" t-key="row_index">
+                                        <td><t t-esc="row.branch"/></td>
+                                        <td class="is-money"><t t-esc="row.total_payable"/></td>
+                                        <td class="is-money"><t t-esc="row.paid_vat"/></td>
+                                        <td class="is-money"><t t-esc="row.outstanding_vat"/></td>
+                                        <td>
+                                            <span t-attf-class="kio-vat-payment__badge kio-vat-payment__badge--{{ row.status_key }}">
+                                                <t t-esc="row.status"/>
+                                            </span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                                <tfoot>
+                                    <tr class="kio-vat-payment__total-row">
+                                        <td>Total</td>
+                                        <td class="is-money">BDT 0.00</td>
+                                        <td class="is-money">BDT 0.00</td>
+                                        <td class="is-money">BDT 0.00</td>
+                                        <td><span class="kio-vat-payment__total-status">—</span></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="kio-vat-payment__tab-content" t-if="isActiveTab('history')">
+                        <div class="kio-vat-payment__table-wrap">
+                            <table class="kio-vat-payment__table">
+                                <thead>
+                                    <tr>
+                                        <th>Payment Reference</th>
+                                        <th>Payment Date</th>
+                                        <th>Branch</th>
+                                        <th class="is-money">Payment Amount</th>
+                                        <th>Payment Journal</th>
+                                        <th>Challan Number</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr t-foreach="paymentHistoryRows" t-as="row" t-key="row_index">
+                                        <td><t t-esc="row.reference"/></td>
+                                        <td><t t-esc="row.date"/></td>
+                                        <td><t t-esc="row.branch"/></td>
+                                        <td class="is-money"><t t-esc="row.amount"/></td>
+                                        <td><t t-esc="row.journal"/></td>
+                                        <td><t t-esc="row.challan"/></td>
+                                        <td><t t-esc="row.status"/></td>
+                                    </tr>
+                                    <tr t-if="!paymentHistoryRows.length" class="kio-vat-payment__empty-row">
+                                        <td colspan="7">
+                                            <div class="kio-vat-payment__empty-state">
+                                                <i class="fa fa-folder-open-o" aria-hidden="true"/>
+                                                <p class="kio-vat-payment__empty-title">No payment history available</p>
+                                                <p class="kio-vat-payment__empty-subtitle">Payment records will appear here once VAT payments are available.</p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </section>
             </main>

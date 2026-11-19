@@ -1,16 +1,450 @@
 .kio-vat-payment {
-  .kio-cash-deposit__hero {
-    grid-template-columns: minmax(0, 1fr);
-    margin-bottom: 26px;
+  --kio-vat-purple: #7c4c7f;
+  --kio-vat-purple-dark: #6a3f6d;
+  --kio-vat-green: #1e8e5a;
+  --kio-vat-green-bg: #eaf7f0;
+  --kio-vat-orange: #d97706;
+  --kio-vat-orange-bg: #fff4e5;
+  --kio-vat-red: #c62828;
+  --kio-vat-red-bg: #fdecec;
+  --kio-vat-border: #e2e4e8;
+  --kio-vat-text: #202732;
+  --kio-vat-muted: #6d7380;
+  --kio-vat-panel-bg: #ffffff;
+
+  height: 100%;
+  min-height: 100%;
+  overflow: auto;
+  background: #ffffff;
+  color: var(--kio-vat-text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans",
+    Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+
+  .kio-vat-payment__page {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 26px 28px 22px;
   }
 
-  .kio-vat-payment__content {
-    padding: 24px;
+  .kio-vat-payment__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
   }
 
-  .kio-vat-payment__placeholder {
+  .kio-vat-payment__title {
     margin: 0;
-    color: #6d7380;
+    color: var(--kio-vat-text);
+    font-size: 31px;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+
+  .kio-vat-payment__new-payment-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-width: 156px;
+    height: 46px;
+    padding: 0 18px;
+    border: 1px solid var(--kio-vat-purple);
+    border-radius: 5px;
+    background: var(--kio-vat-purple);
+    color: #ffffff;
     font-size: 15px;
+    font-weight: 600;
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
+
+  .kio-vat-payment__new-payment-btn i {
+    font-size: 14px;
+  }
+
+  .kio-vat-payment__kpis {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+    margin-bottom: 22px;
+  }
+
+  .kio-vat-payment__kpi-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-height: 112px;
+    padding: 18px 20px;
+    border: 1px solid var(--kio-vat-border);
+    border-radius: 8px;
+    background: #ffffff;
+  }
+
+  .kio-vat-payment__kpi-icon-wrap {
+    flex: 0 0 auto;
+  }
+
+  .kio-vat-payment__kpi-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 54px;
+    height: 54px;
+    border-radius: 10px;
+    font-size: 22px;
+  }
+
+  .kio-vat-payment__kpi-card--payable {
+    border-top: 3px solid var(--kio-vat-purple);
+  }
+
+  .kio-vat-payment__kpi-card--payable .kio-vat-payment__kpi-icon {
+    background: #f3ebf4;
+    color: var(--kio-vat-purple);
+  }
+
+  .kio-vat-payment__kpi-card--paid {
+    border-top: 3px solid var(--kio-vat-green);
+  }
+
+  .kio-vat-payment__kpi-card--paid .kio-vat-payment__kpi-icon {
+    background: var(--kio-vat-green-bg);
+    color: var(--kio-vat-green);
+  }
+
+  .kio-vat-payment__kpi-card--outstanding {
+    border-top: 3px solid var(--kio-vat-orange);
+  }
+
+  .kio-vat-payment__kpi-card--outstanding .kio-vat-payment__kpi-icon {
+    background: var(--kio-vat-orange-bg);
+    color: var(--kio-vat-orange);
+  }
+
+  .kio-vat-payment__kpi-body {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .kio-vat-payment__kpi-label {
+    color: #4a5160;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .kio-vat-payment__kpi-value {
+    display: block;
+    width: 100%;
+    color: var(--kio-vat-text);
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: 0.2px;
+    text-align: right;
+  }
+
+  .kio-vat-payment__panel {
+    border: 1px solid var(--kio-vat-border);
+    border-radius: 10px;
+    background: var(--kio-vat-panel-bg);
+  }
+
+  .kio-vat-payment__filters {
+    padding: 16px 18px;
+    margin-bottom: 20px;
+  }
+
+  .kio-vat-payment__filters-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(220px, 1.5fr) auto;
+    gap: 14px;
+    align-items: end;
+  }
+
+  .kio-vat-payment__field {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .kio-vat-payment__field-label {
+    color: #4a5160;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .kio-vat-payment__control {
+    width: 100%;
+    height: 40px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid #d8dce2;
+    border-radius: 5px;
+    background: #ffffff;
+    color: var(--kio-vat-text);
+    font-size: 14px;
+    outline: none;
+  }
+
+  .kio-vat-payment__control:focus {
+    border-color: #b58bb8;
+    box-shadow: 0 0 0 2px rgba(124, 76, 127, 0.12);
+  }
+
+  .kio-vat-payment__search-wrap {
+    position: relative;
+  }
+
+  .kio-vat-payment__control--search {
+    padding-right: 36px;
+  }
+
+  .kio-vat-payment__search-wrap i {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    color: #6f7682;
+    font-size: 14px;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .kio-vat-payment__field--actions {
+    justify-content: flex-end;
+  }
+
+  .kio-vat-payment__reset-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 14px;
+    border: 1px solid #d8dce2;
+    border-radius: 5px;
+    background: #f8f9fb;
+    color: #3f4550;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .kio-vat-payment__reset-btn:hover {
+    background: #f1f2f5;
+    border-color: #cfd5dd;
+  }
+
+  .kio-vat-payment__tabs-panel {
+    overflow: hidden;
+  }
+
+  .kio-vat-payment__tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--kio-vat-border);
+    background: #fbfbfc;
+  }
+
+  .kio-vat-payment__tab {
+    position: relative;
+    height: 48px;
+    padding: 0 16px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: #5c6472;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .kio-vat-payment__tab:hover {
+    color: var(--kio-vat-text);
+  }
+
+  .kio-vat-payment__tab.is-active {
+    color: var(--kio-vat-purple);
+    border-bottom-color: var(--kio-vat-purple);
+  }
+
+  .kio-vat-payment__tab-content {
+    padding: 0;
+  }
+
+  .kio-vat-payment__table-wrap {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .kio-vat-payment__table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+  }
+
+  .kio-vat-payment__table th,
+  .kio-vat-payment__table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--kio-vat-border);
+    font-size: 14px;
+    line-height: 1.4;
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  .kio-vat-payment__table th {
+    color: #3f4550;
+    font-weight: 700;
+    background: #ffffff;
+    white-space: nowrap;
+  }
+
+  .kio-vat-payment__table tbody tr:hover:not(.kio-vat-payment__empty-row) {
+    background: #faf7fb;
+  }
+
+  .kio-vat-payment__table .is-money {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .kio-vat-payment__table tfoot td {
+    border-bottom: 0;
+  }
+
+  .kio-vat-payment__total-row td {
+    background: #fcfcfd;
+    color: var(--kio-vat-text);
+    font-weight: 700;
+  }
+
+  .kio-vat-payment__total-status {
+    color: var(--kio-vat-muted);
+    font-weight: 600;
+  }
+
+  .kio-vat-payment__badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 74px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .kio-vat-payment__badge--paid {
+    background: var(--kio-vat-green-bg);
+    color: #166a44;
+  }
+
+  .kio-vat-payment__badge--partial {
+    background: var(--kio-vat-orange-bg);
+    color: #9a5a00;
+  }
+
+  .kio-vat-payment__badge--unpaid {
+    background: var(--kio-vat-red-bg);
+    color: #9f2424;
+  }
+
+  .kio-vat-payment__empty-row td {
+    padding: 0;
+  }
+
+  .kio-vat-payment__empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 220px;
+    padding: 28px 16px;
+    text-align: center;
+  }
+
+  .kio-vat-payment__empty-state i {
+    color: #b7a0b9;
+    font-size: 34px;
+  }
+
+  .kio-vat-payment__empty-title {
+    margin: 0;
+    color: #2f3440;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .kio-vat-payment__empty-subtitle {
+    margin: 0;
+    color: var(--kio-vat-muted);
+    font-size: 14px;
+  }
+
+  @media (max-width: 1100px) {
+    .kio-vat-payment__filters-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .kio-vat-payment__field--search,
+    .kio-vat-payment__field--actions {
+      grid-column: span 1;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .kio-vat-payment__kpis {
+      grid-template-columns: 1fr;
+    }
+
+    .kio-vat-payment__kpi-card {
+      min-height: 100px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .kio-vat-payment__page {
+      padding: 18px 14px;
+    }
+
+    .kio-vat-payment__header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .kio-vat-payment__title {
+      font-size: 27px;
+    }
+
+    .kio-vat-payment__new-payment-btn {
+      width: 100%;
+    }
+
+    .kio-vat-payment__filters-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .kio-vat-payment__tabs {
+      padding: 0 4px;
+      overflow-x: auto;
+    }
+
+    .kio-vat-payment__tab {
+      white-space: nowrap;
+    }
   }
 }
