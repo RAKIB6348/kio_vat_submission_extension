@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_kio_vat_payment_client" model="ir.actions.client">
+        <field name="name">VAT Payment</field>
+        <field name="tag">kio_vat_submission_extension.vat_payment_page</field>
+    </record>
+
+    <menuitem
+        id="menu_kio_vat_payment"
+        name="VAT Payment"
+        parent="kio_cash_deposit.menu_kio_cash_deposit_root"
+        action="action_kio_vat_payment_client"
+        sequence="5"
+        groups="kio_cash_deposit.group_kio_cash_deposit_user"
+    />
+</odoo>

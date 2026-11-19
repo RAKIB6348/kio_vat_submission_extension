@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="kio_vat_submission_extension_vat_payment_templates" xml:space="preserve">
+    <t t-name="kio_vat_submission_extension.vat_payment_page">
+        <div class="kio-cash-deposit kio-vat-payment">
+            <main class="kio-cash-deposit__page">
+                <header class="kio-cash-deposit__hero">
+                    <div class="kio-cash-deposit__heading">
+                        <h1>VAT Payment</h1>
+                    </div>
+                </header>
+
+                <section class="kio-cash-deposit__list-panel">
+                    <div class="kio-vat-payment__content">
+                        <p class="kio-vat-payment__placeholder">
+                            VAT Payment page
+                        </p>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </t>
+</templates>

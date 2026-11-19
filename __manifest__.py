@@ -24,12 +24,17 @@ existing card design is reused.
     "depends": [
         "kio_cash_deposit",
     ],
-    "data": [],
+    "data": [
+        "views/vat_payment_views.xml",
+    ],
     "assets": {
         "web.assets_backend": [
             "kio_vat_submission_extension/static/src/js/cash_deposit_dashboard_extension.js",
+            "kio_vat_submission_extension/static/src/js/vat_payment_page.js",
             "kio_vat_submission_extension/static/src/xml/cash_deposit_dashboard_extension.xml",
+            "kio_vat_submission_extension/static/src/xml/vat_payment_page.xml",
             "kio_vat_submission_extension/static/src/scss/cash_deposit_dashboard_extension.scss",
+            "kio_vat_submission_extension/static/src/scss/vat_payment_page.scss",
         ],
         "web.qunit_suite_tests": [
             "kio_vat_submission_extension/static/tests/cash_deposit_kpi_tests.js",

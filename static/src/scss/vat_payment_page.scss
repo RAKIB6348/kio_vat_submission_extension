@@ -1,0 +1,16 @@
+.kio-vat-payment {
+  .kio-cash-deposit__hero {
+    grid-template-columns: minmax(0, 1fr);
+    margin-bottom: 26px;
+  }
+
+  .kio-vat-payment__content {
+    padding: 24px;
+  }
+
+  .kio-vat-payment__placeholder {
+    margin: 0;
+    color: #6d7380;
+    font-size: 15px;
+  }
+}
