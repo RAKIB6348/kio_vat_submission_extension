@@ -1,73 +1,120 @@
 # KIO VAT Submission Extension
 
-Extends the **KIO Cash Deposit** dashboard (`kio_cash_deposit`) with two
-additional KPI cards rendered immediately before the existing
-**Current Cash Balance** card:
+Extends the **KIO Cash Deposit** application (`kio_cash_deposit`) in Odoo 17
+without modifying the base module.
 
-| Order | Card                | Meaning                                        |
-| ----- | ------------------- | ---------------------------------------------- |
-| 1     | Total Sales Amount  | Posted sales excluding VAT (net of refunds)    |
-| 2     | Total VAT           | VAT collected from those sales (net of refunds)|
-| 3     | Current Cash Balance| Existing card, calculation unchanged           |
+## Features
 
-## Implementation
+### 1. Cash Deposit dashboard KPI cards
+Adds two KPI cards immediately before the existing **Current Cash Balance**
+card on the Cash Deposit dashboard:
 
-The extension is developed against `kio_cash_deposit` **without modifying it**:
+| Order | Card                 | Meaning                                                                 |
+| ----- | -------------------- | ----------------------------------------------------------------------- |
+| 1     | Total Sales Amount   | Sales excluding VAT attributable to remaining cash (FIFO-based)         |
+| 2     | Total VAT            | VAT attributable to remaining cash (FIFO-based)                         |
+| 3     | Current Cash Balance | Existing base card, unchanged                                           |
 
-* **Backend** (`models/cash_deposit.py`) — `_inherit = "kio.cash.deposit"` and
-  an override of `get_cash_deposit_dashboard_data()` that calls the base
-  implementation (leaving `current_balance` and everything else untouched) and
-  adds `total_sales` / `total_vat` to the response. The KPIs are computed
-  from actual POS sales transactions that are associated with the cash
-  balance:
+**KPI computation (backend):**
 
-  * eligible orders are POS orders in a **closed session**, with state in
-    `paid` / `done` / `invoiced`, in the current company and with
-    `date_order` up to the end of the current date in the company
-    timezone (all history through today is included),
-  * for each order only the **cash-paid portion** is counted: payments
-    whose payment method points to the same cash journals that back the
-    Current Cash Balance card (the selected branch's cash journal, or all
-    company cash journals for admins with no branch selection),
-  * mixed payments are allocated pro-rata (`cash_paid / amount_total`),
-  * `Total Sales Amount` = `Σ portion × (amount_total − amount_tax)` and
-    `Total VAT` = `Σ portion × amount_tax` — Odoo's own totals, so
-    discounts, multiple VAT rates, tax-exempt products and refunds (net
-    negative) are all handled. Bank, card, mobile banking, pay-later and
-    other non-cash payments are excluded. Opening balances, cash in/out,
-    transfers, deposits and expenses never contribute (they are not POS
-    order payments). Linked invoices are never read, so an invoiced POS
-    order cannot be double counted. Cash Balance and the KPIs are computed
-    independently.
+- Source POS orders: company-scoped, `state in (paid, done, invoiced)`,
+  `session_id.state = closed`, and `date_order <= end of today` (company/user
+  timezone fallback).
+- Cash coverage follows the dashboard branch/admin scope (selected branches'
+  cash journals, or all company cash journals for admins with no branch
+  selection; no figures when a non-admin has no effective branch, mirroring the
+  base dashboard behavior).
+- For each eligible order, only the **cash-paid portion** is counted from POS
+  payments whose payment method journal is in the coverage cash journals
+  (mixed payments allocated pro-rata: `cash_paid / amount_total`). Odoo order
+  totals are used for sales/VAT basis (`amount_total`, `amount_tax`).
+- A **FIFO cash allocation** model is applied on coverage cash accounts:
+  positive POS cash receipts create sales layers (with their own sales ex-VAT
+  and VAT), opening/non-POS debit inflows create non-sales layers, and cash
+  outflows (including negative POS cash payments/refunds and non-POS credits
+  such as deposits/transfers/expenses, excluding identified POS statement moves
+  to avoid double counting) consume the oldest available inflows first. Same-day
+  opening cash is consumed before same-day sales, and inflows are available
+  before same-day withdrawals.
+- Attributable **Total Sales Amount** and **Total VAT** are calculated from the
+  remaining portion of each POS sales layer (preserving each order's own tax
+  data). POS payment data is used for sales layers; linked invoices are not
+  read for KPI computation.
 
-* **Company / branch / access rights** — the RPC keeps the base access
-  check; company scoping always applies; amount computations use `sudo()`
-  only for the aggregated read, mirroring the base module's balance
-  calculation. A branch filter (the existing dashboard filter) restricts the
-  POS part to the selected branches' POS sessions and to the POS-invoiced
-  invoices of those sessions; non-POS invoices cannot be attributed to a
-  branch and are excluded while a branch filter is active.
+### 2. VAT Payment menu and dashboard page
+Adds a **VAT Payment** menu under the Cash Deposit app (after **Cash Deposit**
+dashboard, before **Deposits**) opening a client-action dashboard page:
 
-* **Frontend** (`static/src/...`) — a small `patch()` on the registered
-  dashboard component consumes the two new keys, an XML `t-inherit` extension
-  inserts the two cards before the balance card, and SCSS keeps the three
-  cards on one horizontal row on desktop and responsive on smaller screens.
-  Card design, colors, typography and spacing are reused from the existing
-  dashboard card classes.
+- Header: **VAT Payment** title and **+ New Payment** button.
+- KPI cards (UI placeholders, BDT 0.00): **Total VAT Payable**, **Total Paid
+  VAT**, **Outstanding VAT**.
+- Filter toolbar (frontend UI state): Branch (defaults to *All Branches*, loaded
+  read-only from existing `kio.cash.deposit.get_cash_deposit_branch_options`
+  when available), date range, search, and reset filters.
+- Tabs (frontend switching):
+  - **Branch-wise Summary** table (`Branch`, `Total VAT Payable`, `Paid VAT`,
+    `Outstanding VAT`, `Status`) with total row and status badge styling
+    (Paid/Partial/Unpaid); no fabricated records.
+  - **Payment History** table (`Payment Reference`, `Payment Date`, `Branch`,
+    `Payment Amount`, `Payment Journal`, `Challan Number`, `Status`) with empty
+    state when no records are available.
+
+**New Payment (current phase):**
+- The **+ New Payment** button opens the standard Odoo Register Payment form
+  (`account.view_account_payment_register_form`, `account.payment.register`,
+  form, `target="new"`), resolved by XML ID.
+- A module-scoped initialization path (`kio_vat_payment_dashboard` context)
+  allows the standard wizard to open from this dashboard without
+  invoice/journal-item context and without fake accounting records.
+- Payment confirmation is blocked in this dashboard flow until the VAT payment
+  accounting workflow is implemented (no payments are created/posted). Standard
+  normal invoice/journal-item register-payment behavior remains unchanged.
+
+### 3. Payment History menu
+Adds a **Payment History** menu (after **VAT Payment**, before **Deposits**)
+using a standard `ir.actions.act_window` on `account.payment`
+(`view_mode="tree,form"`), reusing existing default Odoo views:
+
+- Search: `account.view_account_payment_search`
+- Tree: `account.view_account_payment_tree`
+- Form: `account.view_account_payment_form`
+
+The action domain is currently `[('id', '=', False)]` so that no regular
+customer/vendor payments are shown and the list remains empty until VAT payments
+can be reliably identified by the VAT payment workflow/integration. Standard
+search, filters, grouping, sorting, pagination, and accounting access/record
+rules are preserved.
+
+## Menu structure (Cash Deposit app)
+Under `kio_cash_deposit.menu_kio_cash_deposit_root` (base menus unchanged):
+
+1. Cash Deposit (base dashboard)
+2. VAT Payment (this module)
+3. Payment History (this module)
+4. Deposits (base)
+5. Reporting (base)
+6. Configuration (base)
+
+## Implementation notes
+- **Scope:** implemented entirely in `kio_vat_submission_extension`; does not
+  modify `kio_cash_deposit` or standard Odoo accounting modules.
+- **Backend:** `models/cash_deposit.py` extends dashboard RPC/KPI logic;
+  `models/account_payment_register.py` provides the scoped dashboard-only
+  `account.payment.register` initialization/blocking behavior.
+- **Frontend:** dashboard KPI patch and VAT Payment page assets in
+  `static/src/{js,xml,scss}`; VAT Payment page styling is scoped to avoid
+  impacting existing dashboard layout.
+- **Access:** menus follow Cash Deposit app user access (`group_kio_cash_deposit_user`)
+  where applicable; standard `account.payment` security and branch/record rules
+  are not bypassed.
 
 ## Tests
-
-* Backend: `tests/test_sales_vat_kpis.py` (post_install) — KPI calculation
-  for cash-paid POS sales: cash-only orders, mixed cash/card allocation,
-  multiple VAT rates and tax-exempt sales, discounts, refunds (full and
-  partial), zero-total orders, open sessions excluded, historical orders
-  through today, opening cash balances/deposits/expenses ignored, branch
-  filter scoping, manager scoping, invoiced POS orders counted once, and
-  access rights.
-* Frontend: `static/tests/cash_deposit_kpi_tests.js` (QUnit) — card order,
-  rendering of the three cards and zero-fallback of the KPI values.
+- Backend: `tests/test_sales_vat_kpis.py` (`post_install`) — KPI/FIFO behavior,
+  POS cash eligibility and allocation, refunds/withdrawals/opening balances,
+  branch scoping, and access rights.
+- Frontend: `static/tests/cash_deposit_kpi_tests.js` (QUnit) — dashboard KPI
+  card order, rendering, and fallback behavior.
 
 ## Installation
-
-Install/update `kio_vat_submission_extension` like any other module. It
-depends on `kio_cash_deposit`.
+Install or upgrade `kio_vat_submission_extension` as a standard Odoo 17 module.
+It depends on `kio_cash_deposit`.
