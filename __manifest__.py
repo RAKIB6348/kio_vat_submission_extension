@@ -27,6 +27,7 @@ existing card design is reused.
     "data": [
         "views/vat_payment_views.xml",
         "views/payment_history_views.xml",
+        "views/account_payment_register_views.xml",
     ],
     "assets": {
         "web.assets_backend": [

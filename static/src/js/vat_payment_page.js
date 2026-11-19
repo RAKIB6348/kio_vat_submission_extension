@@ -173,6 +173,16 @@ export class VatPaymentPage extends Component {
         );
         const viewId = data && data.length ? data[0].res_id : false;
 
+        const context = {
+            kio_vat_payment_dashboard: true,
+        };
+        if (this.state.filters.branchId && this.state.filters.branchId !== "all") {
+            const branchId = Number(this.state.filters.branchId);
+            if (branchId) {
+                context.default_kio_vat_branch_id = branchId;
+            }
+        }
+
         await this.action.doAction({
             type: "ir.actions.act_window",
             name: "Register Payment",
@@ -180,9 +190,7 @@ export class VatPaymentPage extends Component {
             view_mode: "form",
             views: [[viewId || false, "form"]],
             target: "new",
-            context: {
-                kio_vat_payment_dashboard: true,
-            },
+            context,
         });
     }
 }
