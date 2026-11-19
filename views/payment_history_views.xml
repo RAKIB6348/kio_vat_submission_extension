@@ -5,11 +5,30 @@
         <field name="res_model">account.payment</field>
         <field name="view_mode">tree,form</field>
         <field name="search_view_id" ref="account.view_account_payment_search"/>
-        <field name="domain">[('id', '=', False)]</field>
-        <field name="context">{}</field>
+        <field name="domain">[('is_kio_vat_payment', '=', True)]</field>
+        <field name="context">{'kio_vat_payment_history': True}</field>
         <field name="view_ids" eval="[(5, 0, 0),
             (0, 0, {'view_mode': 'tree', 'view_id': ref('account.view_account_payment_tree')}),
             (0, 0, {'view_mode': 'form', 'view_id': ref('account.view_account_payment_form')})]"/>
+    </record>
+
+    <!--
+        Add the Branch column to the *standard* payment list view only in the
+        VAT Payment History context. Normal customer/vendor payment lists keep
+        their original columns because the column is invisible without the
+        history context key.
+    -->
+    <record id="view_account_payment_tree_kio_vat_history" model="ir.ui.view">
+        <field name="name">account.payment.tree.kio.vat.history</field>
+        <field name="model">account.payment</field>
+        <field name="inherit_id" ref="account.view_account_payment_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='partner_id']" position="after">
+                <field name="kio_vat_branch_id"
+                       string="Branch"
+                       column_invisible="not context.get('kio_vat_payment_history')"/>
+            </xpath>
+        </field>
     </record>
 
     <menuitem

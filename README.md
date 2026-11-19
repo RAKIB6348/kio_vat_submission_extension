@@ -79,11 +79,26 @@ using a standard `ir.actions.act_window` on `account.payment`
 - Tree: `account.view_account_payment_tree`
 - Form: `account.view_account_payment_form`
 
-The action domain is currently `[('id', '=', False)]` so that no regular
-customer/vendor payments are shown and the list remains empty until VAT payments
-can be reliably identified by the VAT payment workflow/integration. Standard
-search, filters, grouping, sorting, pagination, and accounting access/record
-rules are preserved.
+The action domain is `[('is_kio_vat_payment', '=', True)]`, so only payments that
+are explicitly marked as KIO VAT payments are listed; ordinary customer/vendor
+payments are never shown. Standard search, filters, grouping, sorting,
+pagination, and accounting access/record rules are preserved.
+
+**Phase 1 — VAT payment identification:**
+
+- `account.payment` gains two non-copied fields: `is_kio_vat_payment` (boolean,
+  default `False`) and `kio_vat_branch_id` (branch of the same
+  `kio.cash.deposit.branch` model used by the Register Payment wizard).
+- Server-side checks prevent a user without Cash Deposit access from marking a
+  payment as a VAT payment, and reject branches outside the user's mandate or
+  outside the payment's company.
+- The history action sets a `kio_vat_payment_history` context flag. On the
+  server this adds the company restriction and, for managers, the assigned
+  branch restriction to every search/search_read/read_group call, so the view
+  cannot be widened from the client.
+- The standard `account.view_account_payment_tree` is inherited only to add a
+  **Branch** column that is visible in the history context; ordinary customer
+  and vendor payment lists are unchanged.
 
 ## Menu structure (Cash Deposit app)
 Under `kio_cash_deposit.menu_kio_cash_deposit_root` (base menus unchanged):
@@ -100,7 +115,9 @@ Under `kio_cash_deposit.menu_kio_cash_deposit_root` (base menus unchanged):
   modify `kio_cash_deposit` or standard Odoo accounting modules.
 - **Backend:** `models/cash_deposit.py` extends dashboard RPC/KPI logic;
   `models/account_payment_register.py` provides the scoped dashboard-only
-  `account.payment.register` initialization/blocking behavior.
+  `account.payment.register` initialization/blocking behavior;
+  `models/account_payment.py` adds the VAT identification fields, their access
+  guards, and the server-side Payment History scoping.
 - **Frontend:** dashboard KPI patch and VAT Payment page assets in
   `static/src/{js,xml,scss}`; VAT Payment page styling is scoped to avoid
   impacting existing dashboard layout.
@@ -112,6 +129,9 @@ Under `kio_cash_deposit.menu_kio_cash_deposit_root` (base menus unchanged):
 - Backend: `tests/test_sales_vat_kpis.py` (`post_install`) — KPI/FIFO behavior,
   POS cash eligibility and allocation, refunds/withdrawals/opening balances,
   branch scoping, and access rights.
+- Backend: `tests/test_account_payment_vat_identification.py` (`post_install`) —
+  field definitions/defaults, marking restrictions, Payment History scoping,
+  Branch column and the retained Create Payment blocker.
 - Frontend: `static/tests/cash_deposit_kpi_tests.js` (QUnit) — dashboard KPI
   card order, rendering, and fallback behavior.
 
