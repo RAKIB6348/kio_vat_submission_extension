@@ -318,6 +318,8 @@ class TestVatDashboardCashKpi(TransactionCase):
         self.assertIn("openJournalEntry", js)
         self.assertIn('["name", "=", "view_move_form"]', js)
         self.assertNotIn("<th>Challan Number</th>", xml)
+        self.assertNotIn("<th>Payment Journal</th>", xml)
+        self.assertNotIn('<td><t t-esc="row.journal"/></td>', xml)
         self.assertIn("<th>Journal Entry</th>", xml)
         self.assertIn("this.openJournalEntry(row.moveId)", xml)
         self.assertIn('<span t-if="!row.moveId">—</span>', xml)
