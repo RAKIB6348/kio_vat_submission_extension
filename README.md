@@ -46,8 +46,9 @@ Adds a **VAT Payment** menu under the Cash Deposit app (after **Cash Deposit**
 dashboard, before **Deposits**) opening a client-action dashboard page:
 
 - Header: **VAT Payment** title and **+ New Payment** button.
-- KPI cards (UI placeholders, BDT 0.00): **Total VAT Payable**, **Total Paid
-  VAT**, **Outstanding VAT**.
+- Four equal-width KPI cards in one row: **Total VAT Payable**, **Total Paid
+  VAT**, **Outstanding VAT**, **Current Cash Balance** (blue top border, wallet
+  icon, BDT). All values come from backend RPCs; no placeholders.
 - Filter toolbar (frontend UI state): Branch (defaults to *All Branches*, loaded
   read-only from existing `kio.cash.deposit.get_cash_deposit_branch_options`
   when available), date range, search, and reset filters.
@@ -69,6 +70,19 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
 - **Phase 3:** Create Payment now creates and posts one validated outbound VAT
   payment (full or partial) through a dedicated workflow. Standard normal
   invoice/journal-item register-payment behavior remains unchanged.
+
+**Current Cash Balance KPI:**
+- `get_vat_payment_dashboard_data()` also returns `current_cash_balance`, reusing
+  the Cash Deposit Dashboard's GL calculation
+  (`kio.cash.deposit._get_cash_journal_balance`) on the authorized branches'
+  configured cash journals. *All Branches* sums all authorized branches;
+  selecting a branch restricts the value to that branch. Managers see only
+  their assigned branches and company scoping always applies.
+- The value is independent of VAT date/search filters and reflects posted GL
+  movements only. A posted VAT settlement already credits the branch cash
+  account, so no manual deduction is made; bank journals never contribute.
+- The card refreshes on branch/filter changes, on Reset Filters, and after the
+  Register Payment dialog closes following a successful posting.
 
 **Phase 2 — automatic branch cash journal and memo:**
 - Selecting a branch reuses `kio.cash.deposit.branch.branch_cash_account_id`
@@ -196,6 +210,9 @@ Under `kio_cash_deposit.menu_kio_cash_deposit_root` (base menus unchanged):
   partial postings, exact journal entry, validation failures, multi-branch,
   idempotency, rollback, posted-payment protection, history, VAT/GL/cash
   reconciliation and normal payment regression.
+- Backend: `tests/test_vat_dashboard_cash_kpi.py` (`post_install`) — cash KPI
+  value, branch scoping, date-filter independence, manager security, single
+  deduction after posting, bank exclusion and frontend asset declarations.
 - Frontend: `static/tests/cash_deposit_kpi_tests.js` (QUnit) — dashboard KPI
   card order, rendering, and fallback behavior.
 

@@ -5,6 +5,8 @@
   --kio-vat-green-bg: #eaf7f0;
   --kio-vat-orange: #d97706;
   --kio-vat-orange-bg: #fff4e5;
+  --kio-vat-blue: #1f6fb2;
+  --kio-vat-blue-bg: #e8f2fb;
   --kio-vat-red: #c62828;
   --kio-vat-red-bg: #fdecec;
   --kio-vat-border: #e2e4e8;
@@ -71,7 +73,7 @@
 
   .kio-vat-payment__kpis {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 18px;
     margin-bottom: 22px;
   }
@@ -126,6 +128,15 @@
   .kio-vat-payment__kpi-card--outstanding .kio-vat-payment__kpi-icon {
     background: var(--kio-vat-orange-bg);
     color: var(--kio-vat-orange);
+  }
+
+  .kio-vat-payment__kpi-card--cash {
+    border-top: 3px solid var(--kio-vat-blue);
+  }
+
+  .kio-vat-payment__kpi-card--cash .kio-vat-payment__kpi-icon {
+    background: var(--kio-vat-blue-bg);
+    color: var(--kio-vat-blue);
   }
 
   .kio-vat-payment__kpi-body {
@@ -400,6 +411,10 @@
   }
 
   @media (max-width: 1100px) {
+    .kio-vat-payment__kpis {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .kio-vat-payment__filters-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -410,7 +425,7 @@
     }
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 640px) {
     .kio-vat-payment__kpis {
       grid-template-columns: 1fr;
     }

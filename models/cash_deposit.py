@@ -693,5 +693,34 @@ class KioCashDeposit(models.Model):
         summary.update({
             "branch_options": branch_options,
             "selected_branch_id": selected_branch_id,
+            # Reuses the Cash Deposit Dashboard's GL-based balance calculation.
+            # Deliberately independent of the VAT date filters; the balance is
+            # read as posted so a VAT settlement is reflected exactly once.
+            "current_cash_balance": self._get_vat_current_cash_balance(
+                selected_branch_id
+            ),
         })
         return summary
+
+    @api.model
+    def _get_vat_current_cash_balance(self, branch_id=False):
+        """Actual cash balance of the authorized branch(es).
+
+        No VAT date/search filter is applied here. Bank journals are never
+        included: only the branches' configured cash journals contribute. A
+        posted VAT payment already credits its branch cash account, so the
+        GL-derived balance needs no extra manual deduction.
+        """
+        company = self.env.company
+        if branch_id:
+            branches = self._get_authorized_vat_branches(branch_id=branch_id)
+        else:
+            branches = self._get_authorized_vat_branches()
+        journals = branches.mapped("branch_cash_account_id").filtered(
+            lambda journal: journal.type == "cash" and journal.company_id == company
+        )
+        if not journals:
+            # Mirrors the Cash Deposit Dashboard: a manager without branches
+            # sees no figures rather than the whole company's cash.
+            return 0.0
+        return self._get_cash_journal_balance(journals, company=company)

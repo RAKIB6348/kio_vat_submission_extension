@@ -16,6 +16,7 @@ export class VatPaymentPage extends Component {
                 payable: 0,
                 paid: 0,
                 outstanding: 0,
+                cash: 0,
             },
             branchRows: [],
             filters: {
@@ -78,6 +79,8 @@ export class VatPaymentPage extends Component {
                 payable: Number(data.total_payable || 0),
                 paid: Number(data.total_paid || 0),
                 outstanding: Number(data.outstanding || 0),
+                // Actual GL balance; independent of the VAT date filters.
+                cash: Number(data.current_cash_balance || 0),
             };
             const rows = Array.isArray(data.rows) ? data.rows : [];
             this.state.branchRows = rows.map((row, index) => ({
@@ -92,7 +95,7 @@ export class VatPaymentPage extends Component {
         } catch (error) {
             this.state.branches = [];
             this.state.branchRows = [];
-            this.state.totals = { payable: 0, paid: 0, outstanding: 0 };
+            this.state.totals = { payable: 0, paid: 0, outstanding: 0, cash: 0 };
         } finally {
             this.state.loading = false;
         }
@@ -120,6 +123,13 @@ export class VatPaymentPage extends Component {
                 icon: "fa fa-briefcase",
                 accent: "outstanding",
                 value: this.formatAmount(this.state.totals.outstanding),
+            },
+            {
+                key: "cash",
+                label: "Current Cash Balance",
+                icon: "fa fa-wallet",
+                accent: "cash",
+                value: this.formatAmount(this.state.totals.cash),
             },
         ];
     }
@@ -192,6 +202,9 @@ export class VatPaymentPage extends Component {
             target: "new",
             context,
         });
+        // The wizard dialog closes after Create Payment posts the settlement;
+        // re-read the GL so the cash KPI is immediately up to date.
+        await this.loadDashboardData();
     }
 }
 
