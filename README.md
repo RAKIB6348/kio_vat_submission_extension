@@ -70,6 +70,40 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
   accounting workflow is implemented (no payments are created/posted). Standard
   normal invoice/journal-item register-payment behavior remains unchanged.
 
+**Phase 2 — automatic branch cash journal and memo:**
+- Selecting a branch reuses `kio.cash.deposit.branch.branch_cash_account_id`
+  (the same branch-to-journal mapping used by the Cash Deposit dashboard) to
+  set the wizard's `journal_id`. Available journals are restricted to that
+  branch's configured cash journal(s) in the wizard's company/currency; bank
+  journals and other branches' cash journals are never offered and there is no
+  fallback when the mapping is missing.
+- The configured **Manual** outbound payment method line is selected when
+  available; a clear warning (inline alert plus onchange warning) is shown when
+  the branch has no valid cash journal. Clearing the branch clears the journal,
+  method, memo and amount. Dashboard branch preselection initializes all of
+  these fields.
+- The memo (`communication`) is set to `VAT Payment - <Branch Name>` and follows
+  branch changes. The Outstanding VAT amount calculation is unchanged.
+- The **Recipient Bank Account** field is hidden in the VAT dashboard flow;
+  normal customer/vendor payment forms keep Odoo's standard behaviour.
+
+**Accounting configuration findings (read-only inspection, live DB):**
+- All 16 active branches map to a `cash` journal (companies 1, no journal
+  currency). Each journal's default liquidity account equals its Manual
+  outbound method line's `payment_account_id`, both of type `asset_cash`
+  (e.g. W-09 KHULNA → journal KLNA → account 1001017 "KHULNA Cash").
+- For a manual outbound payment Odoo credits the method line's
+  `payment_account_id`, i.e. the branch cash account directly (the company
+  "Outstanding Payments" 100104 fallback is not used because the method lines
+  define their own accounts). This matches the intended credit side.
+- The **debit** side is `destination_account_id`, which for a supplier payment
+  defaults to the partner's payable account (or the first `liability_payable`
+  account, 200101, when no partner is set). That is **not** the configured VAT
+  Payable account **200904** (`liability_non_current`, reconcile), and 200904
+  is outside the standard `destination_account_id` domain. A future VAT
+  settlement workflow must therefore explicitly decide how the debit side is
+  mapped to 200904; no accounting configuration was changed here.
+
 ### 3. Payment History menu
 Adds a **Payment History** menu (after **VAT Payment**, before **Deposits**)
 using a standard `ir.actions.act_window` on `account.payment`
@@ -132,6 +166,10 @@ Under `kio_cash_deposit.menu_kio_cash_deposit_root` (base menus unchanged):
 - Backend: `tests/test_account_payment_vat_identification.py` (`post_install`) —
   field definitions/defaults, marking restrictions, Payment History scoping,
   Branch column and the retained Create Payment blocker.
+- Backend: `tests/test_vat_payment_journal_selection.py` (`post_install`) —
+  branch→journal/method/memo selection, branch change and clearing, dashboard
+  preselection, missing-journal warning, journal restriction, bank-account
+  hiding, normal wizard isolation and the retained blocker.
 - Frontend: `static/tests/cash_deposit_kpi_tests.js` (QUnit) — dashboard KPI
   card order, rendering, and fallback behavior.
 

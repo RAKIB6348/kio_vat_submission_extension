@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from odoo import api, fields, models, _
+from odoo import Command, api, fields, models, _
 from odoo.exceptions import UserError
 
 
@@ -17,6 +17,9 @@ class AccountPaymentRegister(models.TransientModel):
         compute="_compute_available_kio_vat_branch_ids",
         compute_sudo=True,
     )
+    # Inline feedback for a branch without a usable cash journal. A real
+    # onchange warning is also returned, but this stays visible after load.
+    kio_vat_journal_warning = fields.Char(string="VAT Journal Warning", copy=False)
 
     def _is_vat_payment_dashboard_mode(self):
         self.ensure_one()
@@ -33,6 +36,40 @@ class AccountPaymentRegister(models.TransientModel):
         return self.env["kio.cash.deposit"]._get_authorized_vat_branches().filtered(
             lambda b: b.company_id == company
         )
+
+    @api.model
+    def _get_vat_branch_cash_journals(self, branch, company=None, currency=None):
+        """Cash journals configured on ``branch`` and valid for this payment.
+
+        Reuses the existing branch-to-journal relationship
+        ``kio.cash.deposit.branch.branch_cash_account_id`` (the same mapping the
+        Cash Deposit dashboard uses). No name matching or hardcoded journal IDs
+        are involved. An empty recordset is returned when the mapping is
+        missing, inactive, of the wrong type, from another company or in a
+        different currency - never a bank journal or an unrelated cash journal.
+        """
+        Journal = self.env["account.journal"]
+        company = company or self.env.company
+        if not branch or not branch.exists() or not branch.active:
+            return Journal
+        if branch.company_id != company:
+            return Journal
+        journal = branch.sudo().branch_cash_account_id
+        if (not journal or not journal.active or journal.type != "cash"
+                or journal.company_id != company):
+            return Journal
+        if currency and journal.currency_id and journal.currency_id != currency:
+            return Journal
+        return journal
+
+    @api.model
+    def _get_vat_manual_outbound_method(self, journal):
+        """Return the journal's configured Manual outbound method line, if any."""
+        if not journal:
+            return self.env["account.payment.method.line"]
+        return journal.sudo().outbound_payment_method_line_ids.filtered(
+            lambda line: line.code == "manual" and line.payment_type == "outbound"
+        )[:1]
 
     @api.depends("company_id")
     def _compute_available_kio_vat_branch_ids(self):
@@ -90,6 +127,19 @@ class AccountPaymentRegister(models.TransientModel):
             amount = self._get_vat_branch_outstanding_amount(
                 branch, company, currency, res.get("payment_date")
             )
+            # Preselected branch: initialize the journal, method and memo in the
+            # same way the branch onchange does for an interactive selection.
+            journals = self._get_vat_branch_cash_journals(
+                branch, company=company, currency=currency
+            )
+            method = self._get_vat_manual_outbound_method(journals[:1])
+            warning = False
+            if branch and not journals:
+                warning = _(
+                    "No valid Cash Journal is configured for branch %(branch)s. "
+                    "Set its 'Branch Cash Account' before creating a VAT payment.",
+                    branch=branch.display_name,
+                )
             res.update({
                 "payment_date": res.get("payment_date") or fields.Date.context_today(self),
                 "company_id": company.id,
@@ -102,10 +152,13 @@ class AccountPaymentRegister(models.TransientModel):
                 "source_amount_currency": 0.0,
                 "amount": amount,
                 "kio_vat_branch_id": branch.id if branch else False,
+                "journal_id": journals[:1].id if journals else False,
+                "payment_method_line_id": method.id if method else False,
+                "communication": f"VAT Payment - {branch.name}" if branch else False,
+                "kio_vat_journal_warning": warning,
                 "can_edit_wizard": True,
                 "can_group_payments": False,
                 "group_payment": False,
-                "communication": False,
                 "line_ids": [(6, 0, [])],
             })
             return res
@@ -113,31 +166,54 @@ class AccountPaymentRegister(models.TransientModel):
 
     @api.onchange("kio_vat_branch_id", "currency_id", "payment_date")
     def _onchange_kio_vat_branch_id(self):
+        warning = False
         for wizard in self:
             if not wizard._is_vat_payment_dashboard_mode():
                 continue
             branch = wizard.kio_vat_branch_id
+            company = wizard.company_id or self.env.company
+            currency = wizard.currency_id or company.currency_id
             if not branch:
                 wizard.amount = 0.0
+                wizard.kio_vat_journal_warning = False
                 continue
-            authorized = wizard._get_vat_payment_authorized_branches(
-                company=wizard.company_id or self.env.company
-            )
+            authorized = wizard._get_vat_payment_authorized_branches(company=company)
             if branch not in authorized:
                 wizard.kio_vat_branch_id = False
                 wizard.amount = 0.0
-                return {
-                    "warning": {
-                        "title": _("Unauthorized Branch"),
-                        "message": _("You are not authorized to select this branch."),
-                    }
+                wizard.kio_vat_journal_warning = False
+                warning = {
+                    "title": _("Unauthorized Branch"),
+                    "message": _("You are not authorized to select this branch."),
                 }
-            wizard.amount = self._get_vat_branch_outstanding_amount(
-                branch,
-                wizard.company_id or self.env.company,
-                wizard.currency_id or (wizard.company_id or self.env.company).currency_id,
-                wizard.payment_date,
+                continue
+            journals = wizard._get_vat_branch_cash_journals(
+                branch, company=company, currency=currency
             )
+            if not journals:
+                wizard.journal_id = False
+                wizard.payment_method_line_id = False
+                wizard.kio_vat_journal_warning = _(
+                    "No valid Cash Journal is configured for branch %(branch)s. "
+                    "Set its 'Branch Cash Account' before creating a VAT payment.",
+                    branch=branch.display_name,
+                )
+                warning = {
+                    "title": _("No Cash Journal Configured"),
+                    "message": wizard.kio_vat_journal_warning,
+                }
+            else:
+                wizard.journal_id = journals[:1]
+                method = wizard._get_vat_manual_outbound_method(journals[:1])
+                if method:
+                    wizard.payment_method_line_id = method
+                wizard.kio_vat_journal_warning = False
+            # Outstanding VAT amount logic is deliberately unchanged.
+            wizard.amount = self._get_vat_branch_outstanding_amount(
+                branch, company, currency, wizard.payment_date,
+            )
+        if warning:
+            return {"warning": warning}
 
     @api.depends('line_ids')
     def _compute_from_lines(self):
@@ -158,11 +234,12 @@ class AccountPaymentRegister(models.TransientModel):
             wizard.can_group_payments = False
         super(AccountPaymentRegister, self - vat_dashboard)._compute_from_lines()
 
-    @api.depends('can_edit_wizard')
+    @api.depends('can_edit_wizard', 'kio_vat_branch_id')
     def _compute_communication(self):
         vat_dashboard = self.filtered(lambda w: w._is_vat_payment_dashboard_mode())
         for wizard in vat_dashboard:
-            wizard.communication = False
+            branch = wizard.kio_vat_branch_id
+            wizard.communication = f"VAT Payment - {branch.name}" if branch else False
         super(AccountPaymentRegister, self - vat_dashboard)._compute_communication()
 
     @api.depends('can_edit_wizard')
@@ -172,26 +249,21 @@ class AccountPaymentRegister(models.TransientModel):
             wizard.group_payment = False
         super(AccountPaymentRegister, self - vat_dashboard)._compute_group_payment()
 
-    @api.depends('payment_type', 'company_id', 'can_edit_wizard')
+    @api.depends('payment_type', 'company_id', 'can_edit_wizard', 'kio_vat_branch_id')
     def _compute_available_journal_ids(self):
         vat_dashboard = self.filtered(lambda w: w._is_vat_payment_dashboard_mode())
         for wizard in vat_dashboard:
             company = wizard.company_id or self.env.company
-            domain = [
-                *self.env["account.journal"]._check_company_domain(company),
-                ("type", "in", ("bank", "cash")),
-            ]
-            if wizard.payment_type == "inbound":
-                domain.append(("inbound_payment_method_line_ids", "!=", False))
-            else:
-                domain.append(("outbound_payment_method_line_ids", "!=", False))
-            journals = self.env["account.journal"].search(domain)
-            if not journals:
-                journals = self.env["account.journal"].search([
-                    *self.env["account.journal"]._check_company_domain(company),
-                    ("type", "in", ("bank", "cash")),
-                ])
-            wizard.available_journal_ids = [(6, 0, journals.ids)]
+            authorized = wizard._get_vat_payment_authorized_branches(company=company)
+            branch = wizard.kio_vat_branch_id if wizard.kio_vat_branch_id in authorized else False
+            # Restricted to the branch's configured cash journal(s). No fallback
+            # to a bank journal or to an unrelated cash journal is allowed.
+            journals = wizard._get_vat_branch_cash_journals(
+                branch,
+                company=company,
+                currency=wizard.currency_id or company.currency_id,
+            )
+            wizard.available_journal_ids = [Command.set(journals.ids)]
         super(AccountPaymentRegister, self - vat_dashboard)._compute_available_journal_ids()
 
     @api.depends('available_journal_ids')
@@ -199,8 +271,24 @@ class AccountPaymentRegister(models.TransientModel):
         vat_dashboard = self.filtered(lambda w: w._is_vat_payment_dashboard_mode())
         for wizard in vat_dashboard:
             available = wizard.available_journal_ids
+            # Keep a user-made choice when it is still among the authorized
+            # journals (relevant if a branch ever exposes several cash journals).
+            if wizard.journal_id and wizard.journal_id in available:
+                continue
             wizard.journal_id = available[:1].id if available else False
         super(AccountPaymentRegister, self - vat_dashboard)._compute_journal_id()
+
+    @api.depends('payment_type', 'journal_id')
+    def _compute_payment_method_line_id(self):
+        vat_dashboard = self.filtered(lambda w: w._is_vat_payment_dashboard_mode())
+        for wizard in vat_dashboard:
+            manual = wizard._get_vat_manual_outbound_method(wizard.journal_id)
+            if manual:
+                wizard.payment_method_line_id = manual
+            else:
+                # Keep standard Odoo behaviour when Manual is not configured.
+                super(AccountPaymentRegister, wizard)._compute_payment_method_line_id()
+        super(AccountPaymentRegister, self - vat_dashboard)._compute_payment_method_line_id()
 
     @api.depends('can_edit_wizard', 'journal_id')
     def _compute_available_partner_bank_ids(self):

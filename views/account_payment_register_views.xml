@@ -7,6 +7,10 @@
         <field name="arch" type="xml">
             <xpath expr="//field[@name='available_journal_ids']" position="after">
                 <field name="available_kio_vat_branch_ids" invisible="1"/>
+                <div role="alert" class="alert alert-warning"
+                     invisible="not context.get('kio_vat_payment_dashboard') or not kio_vat_journal_warning">
+                    <field name="kio_vat_journal_warning" class="oe_inline"/>
+                </div>
             </xpath>
             <xpath expr="//field[@name='journal_id']" position="before">
                 <field name="kio_vat_branch_id"
@@ -15,6 +19,12 @@
                        options="{'no_create': True, 'no_open': True}"
                        invisible="not context.get('kio_vat_payment_dashboard')"
                        required="context.get('kio_vat_payment_dashboard')"/>
+            </xpath>
+            <!-- A VAT payment is a cash payment: the recipient bank account is
+                 not used. Standard (non-dashboard) payments keep Odoo's own
+                 visibility rule untouched. -->
+            <xpath expr="//field[@name='partner_bank_id']" position="attributes">
+                <attribute name="invisible">context.get('kio_vat_payment_dashboard') or not show_partner_bank_account or not can_edit_wizard or (can_group_payments and not group_payment)</attribute>
             </xpath>
         </field>
     </record>
