@@ -20,7 +20,7 @@ company, branch filter and access rights as the dashboard apply, and the
 existing card design is reused.
 """,
     "author": "Kendroo Limited",
-    "website": "kendroo.io",
+    "website": "https://kendroo.io/",
     "depends": [
         "kio_cash_deposit",
     ],

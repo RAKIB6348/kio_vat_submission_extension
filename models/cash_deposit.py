@@ -36,7 +36,7 @@
 import pytz
 from datetime import datetime, time
 
-from odoo import api, fields, models
+from odoo import _, api, fields, models
 
 
 class KioCashDeposit(models.Model):
@@ -363,3 +363,332 @@ class KioCashDeposit(models.Model):
         )
 
         return total_sales, total_vat
+
+    # -------------------------------------------------------------------------
+    # VAT Payment Dashboard (accounting VAT liability / settlement, branch-wise)
+    # -------------------------------------------------------------------------
+
+    @api.model
+    def _get_vat_payable_account(self, company=None):
+        """Return the company's VAT Payable account (code 200904) if configured."""
+        company = company or self.env.company
+        Account = self.env["account.account"].sudo()
+        domain = [
+            ("company_id", "=", company.id),
+            ("code", "=like", "200904%"),
+        ]
+        accounts = Account.search(domain, order="code, id")
+        if not accounts:
+            return Account.browse()
+        # Prefer the exact code when present, otherwise keep deterministic order.
+        exact = accounts.filtered(lambda a: (a.code or "").strip() == "200904")
+        return exact[:1] if exact else accounts[:1]
+
+    @api.model
+    def _get_authorized_vat_branches(self, branch_id=False):
+        """Authorized cash-deposit branches for the current user/company.
+
+        Mirrors cash-deposit dashboard access semantics:
+        - admin: all active branches in current company (optionally filtered),
+        - manager: assigned active branches in current company only.
+        """
+        self._check_cash_deposit_access()
+        company = self.env.company
+        Branch = self.env["kio.cash.deposit.branch"].sudo()
+        company_domain = [("active", "=", True), ("company_id", "=", company.id)]
+        if self._is_cash_deposit_admin():
+            branches = Branch.search(company_domain, order="sequence, name, id")
+        else:
+            branches = self._get_user_cash_deposit_branches().sudo().filtered(
+                lambda b: b.active and b.company_id == company
+            ).sorted(key=lambda b: (b.sequence or 0, b.name or "", b.id))
+
+        if branch_id:
+            try:
+                branch_id = int(branch_id)
+            except (TypeError, ValueError):
+                branch_id = False
+            if branch_id:
+                branches = branches.filtered(lambda b: b.id == branch_id)
+        return branches
+
+    @api.model
+    def _get_pos_config_branch_map(self, company, branches):
+        """Map pos.config -> attributable kio.cash.deposit.branch.
+
+        Attribution uses existing payment-method/journal relations:
+        a config is attributed to a branch when the branch cash journal is one
+        of the config's payment method journals and that resolves to exactly one
+        authorized branch. Ambiguous or missing mappings return no branch.
+        """
+        branches = branches.sudo()
+        branch_by_cash_journal = {}
+        for branch in branches:
+            journal = branch.branch_cash_account_id
+            if journal:
+                # Keep a deterministic single mapping per cash journal.
+                branch_by_cash_journal.setdefault(journal.id, branch)
+        configs = self.env["pos.config"].sudo().search([
+            ("company_id", "=", company.id),
+        ])
+        mapping = {}
+        for config in configs:
+            journal_ids = set(config.payment_method_ids.sudo().mapped("journal_id").ids)
+            matched_branches = {
+                branch_by_cash_journal[jid].id
+                for jid in journal_ids
+                if jid in branch_by_cash_journal
+            }
+            if len(matched_branches) == 1:
+                mapping[config.id] = next(iter(matched_branches))
+        return mapping
+
+    @api.model
+    def _is_vat_settlement_move(self, move):
+        """Return True only for verified posted VAT settlement moves.
+
+        No VAT settlement/payment workflow is implemented in this phase, so no
+        moves are treated as verified settlements (Total Paid VAT remains 0)
+        unless an explicit future marker is present.
+        """
+        if not move:
+            return False
+        move_sudo = move.sudo()
+        # Defensive support for future explicit VAT payment identifiers.
+        payment_fields = ("is_kio_vat_payment", "kio_is_vat_payment", "vat_payment")
+        for field_name in ("payment_id", "payment_ids"):
+            if field_name in move_sudo._fields:
+                payments = move_sudo[field_name]
+                for payment in payments.sudo():
+                    if payment._name != "account.payment":
+                        continue
+                    if getattr(payment, "state", False) != "posted":
+                        continue
+                    for pfield in payment_fields:
+                        if pfield in payment._fields and payment[pfield]:
+                            return True
+        if "is_kio_vat_payment" in move_sudo._fields and move_sudo.is_kio_vat_payment:
+            return True
+        return False
+
+    @api.model
+    def _resolve_vat_move_branch_id(self, move, branch_by_config_id):
+        """Resolve a VAT-related move to a branch id or False (unallocated)."""
+        if not move:
+            return False
+        move_sudo = move.sudo()
+        config_ids = set()
+
+        # POS closing entries: pos.session.move_id -> config_id
+        session = self.env["pos.session"].sudo().search([
+            ("move_id", "=", move_sudo.id),
+            ("company_id", "=", move_sudo.company_id.id),
+        ], limit=1)
+        if session and session.config_id:
+            config_ids.add(session.config_id.id)
+
+        # Invoiced POS orders linked to the move.
+        if "pos_order_ids" in move_sudo._fields:
+            config_ids.update(move_sudo.pos_order_ids.sudo().mapped("config_id").ids)
+
+        if "account_move" in self.env["pos.order"]._fields:
+            orders = self.env["pos.order"].sudo().search([
+                ("company_id", "=", move_sudo.company_id.id),
+                ("account_move", "=", move_sudo.id),
+            ])
+            config_ids.update(orders.mapped("config_id").ids)
+
+        branch_ids = {
+            branch_by_config_id[cid]
+            for cid in config_ids
+            if cid in branch_by_config_id
+        }
+        if len(branch_ids) == 1:
+            return next(iter(branch_ids))
+        return False
+
+    @api.model
+    def _get_vat_branch_summary_data(
+        self, branch_id=False, date_from=False, date_to=False, search=False
+    ):
+        self._check_cash_deposit_access()
+        company = self.env.company
+        currency = company.currency_id
+        vat_account = self._get_vat_payable_account(company)
+        authorized_branches = self._get_authorized_vat_branches()
+        selected_branches = self._get_authorized_vat_branches(branch_id=branch_id)
+        is_single_branch = bool(branch_id)
+        branch_by_config_id = self._get_pos_config_branch_map(company, authorized_branches)
+
+        branch_map = {
+            b.id: {
+                "id": b.id,
+                "name": b.display_name,
+                "payable": 0.0,
+                "paid": 0.0,
+            }
+            for b in authorized_branches
+        }
+        unallocated = {"payable": 0.0, "paid": 0.0}
+
+        search_term = (search or "").strip().lower()
+        date_to_value = date_to or False
+        # Date From is accepted; cumulative totals up to Date To are used so
+        # opening liabilities/settlements are included and outstanding remains
+        # accurate. (Pre-date_from amounts are therefore never excluded.)
+
+        if vat_account:
+            line_domain = [
+                ("account_id", "=", vat_account.id),
+                ("company_id", "=", company.id),
+                ("parent_state", "=", "posted"),
+                ("display_type", "not in", ("line_section", "line_note")),
+            ]
+            if date_to_value:
+                line_domain.append(("date", "<=", date_to_value))
+
+            lines = self.env["account.move.line"].sudo().search(line_domain)
+            for line in lines:
+                move = line.move_id
+                is_settlement = self._is_vat_settlement_move(move)
+                recognized_amount = (line.credit or 0.0) - (line.debit or 0.0)
+                settled_amount = (line.debit or 0.0) - (line.credit or 0.0)
+
+                resolved_branch_id = self._resolve_vat_move_branch_id(
+                    move, branch_by_config_id
+                )
+                bucket = branch_map.get(resolved_branch_id)
+                target = bucket if bucket is not None else unallocated
+                if is_settlement:
+                    target["paid"] += settled_amount
+                else:
+                    target["payable"] += recognized_amount
+
+        # Branch rows to display
+        if is_single_branch:
+            display_branches = selected_branches
+            include_unallocated = False
+        else:
+            display_branches = authorized_branches
+            # Company-wide/all-authorized totals must reconcile with GL including
+            # separately reported unallocated VAT.
+            include_unallocated = True
+
+        rows = []
+        total_payable = 0.0
+        total_paid = 0.0
+        total_outstanding = 0.0
+
+        def _row_status(outstanding_amount, payable_amount, paid_amount):
+            precision = currency.rounding or 0.01
+            if abs(outstanding_amount) < precision and abs(payable_amount) < precision and abs(paid_amount) < precision:
+                return "paid", _("Settled")
+            if abs(outstanding_amount) < precision:
+                return "paid", _("Settled")
+            if abs(paid_amount) >= precision and abs(outstanding_amount) >= precision:
+                if payable_amount == 0 or (paid_amount * payable_amount) > 0:
+                    return "partial", _("Partial")
+            if payable_amount <= 0 and abs(paid_amount) < precision:
+                return "paid", _("Settled")
+            if abs(paid_amount) < precision and abs(outstanding_amount) >= precision:
+                return "unpaid", _("Unpaid")
+            return "unpaid", _("Unpaid")
+
+        def _append_row(name, values, row_id=None, is_unallocated=False):
+            nonlocal total_payable, total_paid, total_outstanding
+            payable = values.get("payable", 0.0)
+            paid = values.get("paid", 0.0)
+            outstanding = payable - paid
+            total_payable += payable
+            total_paid += paid
+            total_outstanding += outstanding
+            status_key, status_label = _row_status(outstanding, payable, paid)
+            rows.append({
+                "id": row_id,
+                "branch": name,
+                "total_payable": payable,
+                "paid_vat": paid,
+                "outstanding_vat": outstanding,
+                "status_key": status_key,
+                "status": status_label,
+                "is_unallocated": is_unallocated,
+            })
+
+        for branch in display_branches:
+            values = branch_map.get(branch.id, {"payable": 0.0, "paid": 0.0})
+            name = values.get("name") or branch.display_name
+            if search_term and search_term not in (name or "").lower():
+                continue
+            _append_row(name, values, row_id=branch.id)
+
+        if include_unallocated:
+            unallocated_name = _("Unallocated VAT")
+            has_unallocated = any(
+                abs(unallocated.get(k, 0.0)) >= (currency.rounding or 0.01)
+                for k in ("payable", "paid")
+            )
+            if has_unallocated or (not search_term) or (search_term in unallocated_name.lower()):
+                if (not search_term) or (search_term in unallocated_name.lower()):
+                    # Avoid showing an empty unallocated row when there are no
+                    # amounts and a search term does not target it; but keep it
+                    # when it carries values (required for GL reconciliation).
+                    if has_unallocated or search_term in unallocated_name.lower():
+                        _append_row(unallocated_name, unallocated, row_id=False, is_unallocated=True)
+
+        # GL reconciliation reference (posted VAT payable account balance, liability-positive)
+        gl_outstanding = 0.0
+        if vat_account:
+            gl_domain = [
+                ("account_id", "=", vat_account.id),
+                ("company_id", "=", company.id),
+                ("parent_state", "=", "posted"),
+                ("display_type", "not in", ("line_section", "line_note")),
+            ]
+            if date_to_value:
+                gl_domain.append(("date", "<=", date_to_value))
+            rg = self.env["account.move.line"].sudo().read_group(
+                gl_domain, ["debit:sum", "credit:sum"], [],
+            )
+            if rg:
+                gl_outstanding = (rg[0].get("credit") or 0.0) - (rg[0].get("debit") or 0.0)
+
+        return {
+            "currency_symbol": currency.symbol or "",
+            "currency_id": currency.id,
+            "total_payable": total_payable,
+            "total_paid": total_paid,
+            "outstanding": total_outstanding,
+            "gl_outstanding": gl_outstanding,
+            "rows": rows,
+            "is_single_branch": is_single_branch,
+            "has_vat_account": bool(vat_account),
+        }
+
+    @api.model
+    def get_vat_payment_dashboard_data(
+        self, branch_id=False, date_from=False, date_to=False, search=False
+    ):
+        self._check_cash_deposit_access()
+        branch_options = self.get_cash_deposit_branch_options()
+        # Normalize branch filter against authorized options for managers/admins.
+        allowed_ids = {b["id"] for b in branch_options.get("branches", [])}
+        selected_branch_id = False
+        if branch_id and str(branch_id) != "all":
+            try:
+                candidate = int(branch_id)
+            except (TypeError, ValueError):
+                candidate = False
+            if candidate and candidate in allowed_ids:
+                selected_branch_id = candidate
+
+        summary = self._get_vat_branch_summary_data(
+            branch_id=selected_branch_id,
+            date_from=date_from or False,
+            date_to=date_to or False,
+            search=search or False,
+        )
+        summary.update({
+            "branch_options": branch_options,
+            "selected_branch_id": selected_branch_id,
+        })
+        return summary
