@@ -5,7 +5,7 @@
             <main class="kio-vat-payment__page">
                 <header class="kio-vat-payment__header">
                     <h1 class="kio-vat-payment__title">VAT Payment</h1>
-                    <button type="button" class="kio-vat-payment__new-payment-btn" disabled="disabled" aria-disabled="true" title="New Payment (coming soon)">
+                    <button type="button" class="kio-vat-payment__new-payment-btn" title="New Payment" t-on-click="openNewPayment">
                         <i class="fa fa-plus"/>
                         <span>New Payment</span>
                     </button>

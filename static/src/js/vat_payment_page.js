@@ -7,6 +7,7 @@ import { useService } from "@web/core/utils/hooks";
 export class VatPaymentPage extends Component {
     setup() {
         this.orm = useService("orm");
+        this.action = useService("action");
         this.state = useState({
             activeTab: "branch",
             branches: [],
@@ -91,6 +92,31 @@ export class VatPaymentPage extends Component {
         this.state.filters.dateFrom = "";
         this.state.filters.dateTo = "";
         this.state.filters.search = "";
+    }
+
+    async openNewPayment() {
+        const data = await this.orm.searchRead(
+            "ir.model.data",
+            [
+                ["module", "=", "account"],
+                ["name", "=", "view_account_payment_register_form"],
+            ],
+            ["res_id"],
+            { limit: 1 }
+        );
+        const viewId = data && data.length ? data[0].res_id : false;
+
+        await this.action.doAction({
+            type: "ir.actions.act_window",
+            name: "Register Payment",
+            res_model: "account.payment.register",
+            view_mode: "form",
+            views: [[viewId || false, "form"]],
+            target: "new",
+            context: {
+                kio_vat_payment_dashboard: true,
+            },
+        });
     }
 }
 
