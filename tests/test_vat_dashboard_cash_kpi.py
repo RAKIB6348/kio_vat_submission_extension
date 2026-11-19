@@ -345,6 +345,20 @@ class TestVatDashboardCashKpi(TransactionCase):
         )
 
     # ------------------------------------------------------------------
+    # Register Payment close/refresh wiring
+    # ------------------------------------------------------------------
+    def test_payment_wizard_closes_and_refreshes_dashboard(self):
+        root = Path(__file__).resolve().parents[1] / "static" / "src"
+        js = (root / "js" / "vat_payment_page.js").read_text()
+        body = js[js.index("async openNewPayment()"):]
+        # The wizard must be refreshed through the dialog close callback, not
+        # unconditionally after doAction() (which resolves on dialog mount).
+        self.assertEqual(body.count("await this.loadDashboardData();"), 1)
+        self.assertIn("onClose: async () =>", body)
+        self.assertIn("kio_vat_payment_idempotency_key", body)
+        self.assertIn('target: "new"', body)
+
+    # ------------------------------------------------------------------
     # Branch-wise Summary Table: Current Cash Balance
     # ------------------------------------------------------------------
     def test_branch_summary_rows_contain_actual_cash_balance(self):

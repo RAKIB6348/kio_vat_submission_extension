@@ -59,7 +59,7 @@ No changes to `kio_cash_deposit`, Odoo core, accounting configuration, existing 
 4. `account.payment.create()` with one outbound payment: marker, branch, journal, method, amount, currency, date, memo (`VAT Payment - <Branch>`) and explicit `destination_account_id = 200904`. No partner is set (none is configured for the VAT authority).
 5. `payment.action_post()` posts the single linked `account.move`.
 6. Verify: move posted, exactly two lines, debit 200904 and credit branch cash account, each equal to the amount, total balance zero. Any failure raises → Odoo rolls back the whole request, leaving no partial payment.
-7. Return a success notification whose `next` action opens the created payment form.
+7. Return a success notification whose `next` action is `ir.actions.act_window_close`: the Register Payment dialog closes and the user stays on the VAT Payment Dashboard. The dashboard's dialog `onClose` callback reloads KPIs, Branch-wise Summary and Payment History while preserving branch/date/search filters and the active tab.
 
 Full and partial payments use the same path; only the amount differs.
 

@@ -79,6 +79,15 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
 - **Phase 3:** Create Payment now creates and posts one validated outbound VAT
   payment (full or partial) through a dedicated workflow. Standard normal
   invoice/journal-item register-payment behavior remains unchanged.
+- After a successful posting the wizard closes with the usual success
+  notification and the user stays on the VAT Payment Dashboard (no redirect to
+  the `account.payment` form). The dashboard then reloads its KPI cards, the
+  Branch-wise Summary and the Payment History tab while preserving the selected
+  branch, date filters, search value and active tab. The reload is driven by the
+  wizard's close callback, so it also runs when the dialog is cancelled, and a
+  validation error keeps the dialog open without refreshing. Each wizard
+  opening supplies an idempotency key, so a repeated click reuses the same
+  payment instead of posting a duplicate.
 
 **Current Cash Balance KPI:**
 - `get_vat_payment_dashboard_data()` also returns `current_cash_balance`, reusing

@@ -236,6 +236,18 @@ export class VatPaymentPage extends Component {
         });
     }
 
+    generateIdempotencyKey() {
+        // Scoped to one wizard opening: a double click on Create Payment
+        // reuses the same key, which the server maps to the already created
+        // payment (no duplicate). Reopening the wizard later gets a fresh key,
+        // so an intentional second payment of the same amount is not blocked.
+        const cryptoObj = typeof window !== "undefined" ? window.crypto : undefined;
+        if (cryptoObj && typeof cryptoObj.randomUUID === "function") {
+            return cryptoObj.randomUUID();
+        }
+        return `vat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    }
+
     async openNewPayment() {
         const data = await this.orm.searchRead(
             "ir.model.data",
@@ -250,6 +262,7 @@ export class VatPaymentPage extends Component {
 
         const context = {
             kio_vat_payment_dashboard: true,
+            kio_vat_payment_idempotency_key: this.generateIdempotencyKey(),
         };
         if (this.state.filters.branchId && this.state.filters.branchId !== "all") {
             const branchId = Number(this.state.filters.branchId);
@@ -258,18 +271,30 @@ export class VatPaymentPage extends Component {
             }
         }
 
-        await this.action.doAction({
-            type: "ir.actions.act_window",
-            name: "Register Payment",
-            res_model: "account.payment.register",
-            view_mode: "form",
-            views: [[viewId || false, "form"]],
-            target: "new",
-            context,
-        });
-        // The wizard dialog closes after Create Payment posts the settlement;
-        // re-read the GL so the cash KPI is immediately up to date.
-        await this.loadDashboardData();
+        await this.action.doAction(
+            {
+                type: "ir.actions.act_window",
+                name: "Register Payment",
+                res_model: "account.payment.register",
+                view_mode: "form",
+                views: [[viewId || false, "form"]],
+                target: "new",
+                context,
+            },
+            {
+                // doAction() resolves as soon as the dialog is mounted, so the
+                // refresh is driven by this close callback instead. It runs
+                // only when the wizard is actually closed (successful posting
+                // or cancel), without a browser reload, and reloads the KPI
+                // cards, Branch-wise Summary and Payment History while keeping
+                // the selected branch, filters, search and active tab.
+                // A validation error leaves the wizard open, so no refresh is
+                // triggered in that case.
+                onClose: async () => {
+                    await this.loadDashboardData();
+                },
+            }
+        );
     }
 }
 

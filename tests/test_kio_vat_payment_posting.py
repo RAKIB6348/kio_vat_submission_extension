@@ -195,11 +195,15 @@ class TestKioVatPaymentPosting(TransactionCase):
         wizard = self._wizard(self.branch_a, 1000.0)
 
         action = wizard.action_create_payments()
-        # The notification's nested act_window must carry explicit views for
-        # the web client's doAction()/_preprocessAction().
-        self.assertEqual(action["params"]["next"]["views"], [[False, "form"]])
+        # The success notification must close the wizard in place: opening the
+        # payment form (act_window) would navigate away from the dashboard.
+        self.assertEqual(action["tag"], "display_notification")
+        self.assertEqual(
+            action["params"]["next"], {"type": "ir.actions.act_window_close"}
+        )
+        self.assertNotIn("res_model", action["params"]["next"])
         payment = self.env["account.payment"].browse(
-            action["params"]["next"]["res_id"]
+            action["params"]["payment_id"]
         )
         self.assertEqual(payment.state, "posted")
         self.assertTrue(payment.is_kio_vat_payment)
@@ -234,7 +238,7 @@ class TestKioVatPaymentPosting(TransactionCase):
         wizard = self._wizard(self.branch_a, 400.0)
         action = wizard.action_create_payments()
         payment = self.env["account.payment"].browse(
-            action["params"]["next"]["res_id"]
+            action["params"]["payment_id"]
         )
         self.assertEqual(payment.amount, 400.0)
         self.assertEqual(payment.move_id.line_ids.filtered(
@@ -320,7 +324,7 @@ class TestKioVatPaymentPosting(TransactionCase):
             wizard = self._wizard(branch, amount)
             action = wizard.action_create_payments()
             payment = self.env["account.payment"].browse(
-                action["params"]["next"]["res_id"]
+                action["params"]["payment_id"]
             )
             self.assertEqual(payment.kio_vat_branch_id, branch)
             self.assertEqual(payment.journal_id, journal)
@@ -331,10 +335,10 @@ class TestKioVatPaymentPosting(TransactionCase):
         self._fund_cash(self.journal_a, 5000.0)
         wizard = self._wizard(self.branch_a, 500.0)
         first = wizard.action_create_payments()
-        first_id = first["params"]["next"]["res_id"]
+        first_id = first["params"]["payment_id"]
         # A second click with the same state must reuse the same payment.
         second = self._wizard(self.branch_a, 500.0).action_create_payments()
-        self.assertEqual(second["params"]["next"]["res_id"], first_id)
+        self.assertEqual(second["params"]["payment_id"], first_id)
         self.assertEqual(self.env["account.payment"].search_count([
             ("is_kio_vat_payment", "=", True),
             ("kio_vat_branch_id", "=", self.branch_a.id),
@@ -362,7 +366,7 @@ class TestKioVatPaymentPosting(TransactionCase):
         self._fund_cash(self.journal_a, 5000.0)
         action = self._wizard(self.branch_a, 100.0).action_create_payments()
         payment = self.env["account.payment"].browse(
-            action["params"]["next"]["res_id"]
+            action["params"]["payment_id"]
         )
         # Tests run as SUPERUSER; use a normal admin to exercise user guards.
         payment = payment.with_user(self.env.ref("base.user_admin"))
@@ -383,7 +387,7 @@ class TestKioVatPaymentPosting(TransactionCase):
         self._fund_cash(self.journal_a, 5000.0)
         action = self._wizard(self.branch_a, 100.0).action_create_payments()
         payment = self.env["account.payment"].browse(
-            action["params"]["next"]["res_id"]
+            action["params"]["payment_id"]
         )
         found = self.env["account.payment"].with_context(
             kio_vat_payment_history=True

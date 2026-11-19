@@ -462,6 +462,14 @@ class AccountPaymentRegister(models.TransientModel):
 
     @staticmethod
     def _kio_vat_success_action(payment):
+        """Show the success notification and close the wizard in place.
+
+        The ``next`` action must be an ``act_window_close`` instead of an
+        ``act_window``: opening the payment form would navigate the user away
+        from the VAT Payment Dashboard. The dashboard passes an ``onClose``
+        callback to ``doAction()`` and reloads its data when this dialog
+        closes, keeping the selected branch, filters, search and active tab.
+        """
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
@@ -469,17 +477,10 @@ class AccountPaymentRegister(models.TransientModel):
                 "title": _("VAT Payment Posted"),
                 "message": _("VAT payment %s has been posted successfully.", payment.name),
                 "type": "success",
-                "next": {
-                    "type": "ir.actions.act_window",
-                    "name": _("VAT Payment"),
-                    "res_model": "account.payment",
-                    "view_mode": "form",
-                    # The "next" action of a display_notification is passed
-                    # straight to doAction(), which requires explicit views.
-                    "views": [[False, "form"]],
-                    "res_id": payment.id,
-                    "context": {"kio_vat_payment_history": True},
-                },
+                # Exposed for clients/tests that need the settled payment
+                # without navigating to it.
+                "payment_id": payment.id,
+                "next": {"type": "ir.actions.act_window_close"},
             },
         }
 
