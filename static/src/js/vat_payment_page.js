@@ -19,6 +19,7 @@ export class VatPaymentPage extends Component {
                 cash: 0,
             },
             branchRows: [],
+            paymentHistoryRows: [],
             filters: {
                 branchId: "all",
                 dateFrom: "",
@@ -109,9 +110,30 @@ export class VatPaymentPage extends Component {
                     status: row.status || "Unpaid",
                 };
             });
+
+            const history = await this.orm.call(
+                "kio.cash.deposit",
+                "get_vat_payment_history_data",
+                [],
+                params
+            );
+            const historyRows = Array.isArray(history && history.rows) ? history.rows : [];
+            this.state.paymentHistoryRows = historyRows.map((row, index) => ({
+                key: `payment_${index}`,
+                reference: row.reference || "",
+                date: row.date || "",
+                branch: row.branch || "",
+                amount: row.amount || "",
+                journal: row.journal || "",
+                moveId: row.move_id || false,
+                moveName: row.move_name || "",
+                challan: row.challan || "",
+                status: row.status || "",
+            }));
         } catch (error) {
             this.state.branches = [];
             this.state.branchRows = [];
+            this.state.paymentHistoryRows = [];
             this.state.totals = { payable: 0, paid: 0, outstanding: 0, cash: 0 };
         } finally {
             this.state.loading = false;
@@ -156,7 +178,7 @@ export class VatPaymentPage extends Component {
     }
 
     get paymentHistoryRows() {
-        return [];
+        return this.state.paymentHistoryRows;
     }
 
     get summaryTotals() {
@@ -187,6 +209,31 @@ export class VatPaymentPage extends Component {
         this.state.filters.dateTo = "";
         this.state.filters.search = "";
         await this.loadDashboardData();
+    }
+
+    async openJournalEntry(moveId) {
+        if (!moveId) {
+            return;
+        }
+        const data = await this.orm.searchRead(
+            "ir.model.data",
+            [
+                ["module", "=", "account"],
+                ["name", "=", "view_move_form"],
+            ],
+            ["res_id"],
+            { limit: 1 }
+        );
+        const viewId = data && data.length ? data[0].res_id : false;
+        await this.action.doAction({
+            type: "ir.actions.act_window",
+            name: "Journal Entry",
+            res_model: "account.move",
+            view_mode: "form",
+            views: [[viewId || false, "form"]],
+            res_id: moveId,
+            target: "current",
+        });
     }
 
     async openNewPayment() {

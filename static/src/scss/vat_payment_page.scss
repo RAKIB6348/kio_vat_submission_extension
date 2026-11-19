@@ -344,6 +344,23 @@
     font-weight: 700;
   }
 
+  .kio-vat-payment__entry-link {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #1f6fb2;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .kio-vat-payment__entry-link:hover {
+    color: #14507f;
+    text-decoration: underline;
+  }
+
   .kio-vat-payment__total-status {
     color: var(--kio-vat-muted);
     font-weight: 600;

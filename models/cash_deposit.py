@@ -748,3 +748,72 @@ class KioCashDeposit(models.Model):
             # sees no figures rather than the whole company's cash.
             return 0.0
         return self._get_cash_journal_balance(journals, company=company)
+
+    @api.model
+    def get_vat_payment_history_data(
+        self, branch_id=False, date_from=False, date_to=False, search=False, limit=100
+    ):
+        """Rows for the VAT Payment page's Payment History tab.
+
+        Uses the same Phase 1 marker and branch/company authorization as the
+        Payment History menu, so ordinary customer/vendor payments are never
+        exposed. sudo() is used only for the read; the domain is built from the
+        caller's authorized branches, so access is still enforced server-side.
+        """
+        self._check_cash_deposit_access()
+        company = self.env.company
+        authorized = self._get_authorized_vat_branches()
+        if branch_id and str(branch_id) != "all":
+            try:
+                branch_id = int(branch_id)
+            except (TypeError, ValueError):
+                branch_id = False
+            if branch_id:
+                authorized = authorized.filtered(lambda b: b.id == branch_id)
+
+        domain = [
+            ("is_kio_vat_payment", "=", True),
+            ("company_id", "=", company.id),
+            ("kio_vat_branch_id", "in", authorized.ids),
+        ]
+        if date_from:
+            domain.append(("date", ">=", date_from))
+        if date_to:
+            domain.append(("date", "<=", date_to))
+        if search:
+            term = str(search).strip()
+            if term:
+                domain += ["|", ("name", "ilike", term), ("ref", "ilike", term)]
+
+        try:
+            limit = max(1, min(int(limit or 100), 200))
+        except (TypeError, ValueError):
+            limit = 100
+        payments = self.env["account.payment"].sudo().search(
+            domain, order="date desc, id desc", limit=limit
+        )
+        symbol = company.currency_id.symbol or "BDT"
+        status_labels = {
+            "draft": "Draft",
+            "posted": "Posted",
+            "cancel": "Cancelled",
+        }
+        rows = []
+        for payment in payments:
+            amount = f"{symbol} {(payment.amount or 0.0):,.2f}"
+            # account.payment delegates move_id/name to its existing
+            # account.move; no new journal entry is created here.
+            move = payment.move_id
+            rows.append({
+                "reference": payment.name or "",
+                "date": fields.Date.to_string(payment.date) if payment.date else "",
+                "branch": payment.kio_vat_branch_id.name or "",
+                "amount": amount,
+                "journal": payment.journal_id.code or payment.journal_id.name or "",
+                "move_id": move.id or False,
+                "move_name": move.name or "",
+                # Kept in the payload; no challan field is configured yet.
+                "challan": "",
+                "status": status_labels.get(payment.state, payment.state or ""),
+            })
+        return {"rows": rows, "total_count": len(rows)}

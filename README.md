@@ -60,8 +60,14 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
     balance, unallocated VAT shows a dash, and the total row matches the Current
     Cash Balance KPI while deduplicating shared cash journals.
   - **Payment History** table (`Payment Reference`, `Payment Date`, `Branch`,
-    `Payment Amount`, `Payment Journal`, `Challan Number`, `Status`) with empty
-    state when no records are available.
+    `Payment Amount`, `Payment Journal`, `Journal Entry`, `Status`) backed by
+    `get_vat_payment_history_data()`: only posted/marked VAT payments of the
+    authorized branches are returned, filtered by the same branch/date/search
+    controls and refreshed after posting. The **Journal Entry** cell shows the
+    existing linked `account.move.name` (or `—` when absent) and opens that
+    record in the standard Journal Entry form via the action service. No new
+    journal entry is created; the previous *Challan Number* column was only
+    removed from this table (no database/form field was deleted).
 
 **New Payment:**
 - The **+ New Payment** button opens the standard Odoo Register Payment form

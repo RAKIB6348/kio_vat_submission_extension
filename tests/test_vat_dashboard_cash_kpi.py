@@ -240,6 +240,69 @@ class TestVatDashboardCashKpi(TransactionCase):
         )
 
     # ------------------------------------------------------------------
+    # Payment History tab data source
+    # ------------------------------------------------------------------
+    def test_history_returns_only_posted_vat_payments(self):
+        self._wizard(self.branch_a, 100.0).action_create_payments()
+        self.env["account.payment"].create({
+            "payment_type": "outbound",
+            "partner_type": "supplier",
+            "amount": 10.0,
+            "journal_id": self.journal_a.id,
+            "company_id": self.company.id,
+            "date": fields.Date.today(),
+        })
+        data = self.env["kio.cash.deposit"].get_vat_payment_history_data(
+            branch_id=self.branch_a.id
+        )
+        self.assertEqual(len(data["rows"]), 1)
+        row = data["rows"][0]
+        self.assertEqual(row["branch"], "VAT Cash KPI A")
+        self.assertEqual(row["journal"], "VCKA")
+        self.assertEqual(row["status"], "Posted")
+        self.assertTrue(row["reference"])
+        symbol = self.company.currency_id.symbol or "BDT"
+        self.assertEqual(row["amount"], f"{symbol} 100.00")
+        self.assertEqual(row["challan"], "")
+        # Journal Entry comes from the payment's existing linked account.move.
+        payment = self.env["account.payment"].search([
+            ("is_kio_vat_payment", "=", True),
+            ("kio_vat_branch_id", "=", self.branch_a.id),
+        ], limit=1)
+        self.assertTrue(payment.move_id)
+        self.assertEqual(row["move_id"], payment.move_id.id)
+        self.assertEqual(row["move_name"], payment.move_id.name)
+
+    def test_history_branch_filter_and_manager_scope(self):
+        self._fund_vat(self.branch_b, 200.0)
+        self._wizard(self.branch_a, 100.0).action_create_payments()
+        self._wizard(self.branch_b, 50.0).action_create_payments()
+        D = self.env["kio.cash.deposit"]
+        rows_a = D.get_vat_payment_history_data(branch_id=self.branch_a.id)["rows"]
+        rows_b = D.get_vat_payment_history_data(branch_id=self.branch_b.id)["rows"]
+        self.assertEqual([r["branch"] for r in rows_a], ["VAT Cash KPI A"])
+        self.assertEqual([r["branch"] for r in rows_b], ["VAT Cash KPI B"])
+
+        manager = self.env["res.users"].create({
+            "name": "VAT History Manager",
+            "login": "vat_history_manager",
+            "groups_id": [
+                Command.set([
+                    self.env.ref("base.group_user").id,
+                    self.env.ref(
+                        "kio_cash_deposit.group_kio_cash_deposit_user"
+                    ).id,
+                ]),
+            ],
+            "kio_cash_deposit_branch_ids": [Command.set(self.branch_a.ids)],
+            "company_ids": [Command.set(self.company.ids)],
+        })
+        manager_rows = self.env(user=manager)[
+            "kio.cash.deposit"
+        ].get_vat_payment_history_data()["rows"]
+        self.assertEqual([r["branch"] for r in manager_rows], ["VAT Cash KPI A"])
+
+    # ------------------------------------------------------------------
     # Frontend card definition (source-level regression guard)
     # ------------------------------------------------------------------
     def test_kpi_card_is_declared_in_frontend_assets(self):
@@ -250,6 +313,14 @@ class TestVatDashboardCashKpi(TransactionCase):
         self.assertIn('label: "Current Cash Balance"', js)
         self.assertIn('icon: "fa fa-money"', js)
         self.assertIn("data.current_cash_balance", js)
+        self.assertIn("get_vat_payment_history_data", js)
+        self.assertIn("return this.state.paymentHistoryRows;", js)
+        self.assertIn("openJournalEntry", js)
+        self.assertIn('["name", "=", "view_move_form"]', js)
+        self.assertNotIn("<th>Challan Number</th>", xml)
+        self.assertIn("<th>Journal Entry</th>", xml)
+        self.assertIn("this.openJournalEntry(row.moveId)", xml)
+        self.assertIn('<span t-if="!row.moveId">—</span>', xml)
         self.assertIn("repeat(4, minmax(0, 1fr))", scss)
         self.assertIn("kio-vat-payment__kpi-card--cash", scss)
         self.assertIn("border-top: 3px solid var(--kio-vat-blue)", scss)

@@ -172,18 +172,29 @@
                                         <th>Branch</th>
                                         <th class="is-money">Payment Amount</th>
                                         <th>Payment Journal</th>
-                                        <th>Challan Number</th>
+                                        <th>Journal Entry</th>
                                         <th>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr t-foreach="paymentHistoryRows" t-as="row" t-key="row_index">
+                                    <tr t-foreach="paymentHistoryRows" t-as="row" t-key="row.key">
                                         <td><t t-esc="row.reference"/></td>
                                         <td><t t-esc="row.date"/></td>
                                         <td><t t-esc="row.branch"/></td>
                                         <td class="is-money"><t t-esc="row.amount"/></td>
                                         <td><t t-esc="row.journal"/></td>
-                                        <td><t t-esc="row.challan"/></td>
+                                        <td>
+                                            <button
+                                                t-if="row.moveId"
+                                                type="button"
+                                                class="kio-vat-payment__entry-link"
+                                                title="Open Journal Entry"
+                                                t-on-click="() => this.openJournalEntry(row.moveId)"
+                                            >
+                                                <t t-esc="row.moveName"/>
+                                            </button>
+                                            <span t-if="!row.moveId">—</span>
+                                        </td>
                                         <td><t t-esc="row.status"/></td>
                                     </tr>
                                     <tr t-if="!paymentHistoryRows.length" class="kio-vat-payment__empty-row">
@@ -191,7 +202,7 @@
                                             <div class="kio-vat-payment__empty-state">
                                                 <i class="fa fa-folder-open-o" aria-hidden="true"/>
                                                 <p class="kio-vat-payment__empty-title">No payment history available</p>
-                                                <p class="kio-vat-payment__empty-subtitle">Payment records will appear here once VAT payments are available.</p>
+                                                <p class="kio-vat-payment__empty-subtitle">Posted VAT payments for the selected branch will appear here.</p>
                                             </div>
                                         </td>
                                     </tr>
