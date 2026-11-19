@@ -532,8 +532,6 @@ class KioCashDeposit(models.Model):
             }
             for b in authorized_branches
         }
-        unallocated = {"payable": 0.0, "paid": 0.0}
-
         search_term = (search or "").strip().lower()
         date_to_value = date_to or False
         # Date From is accepted; cumulative totals up to Date To are used so
@@ -561,21 +559,22 @@ class KioCashDeposit(models.Model):
                     move, branch_by_config_id
                 )
                 bucket = branch_map.get(resolved_branch_id)
-                target = bucket if bucket is not None else unallocated
+                if bucket is None:
+                    # VAT that cannot be attributed to a configured,
+                    # authorized branch is not displayed and not included in
+                    # the KPI/total figures. The accounting records themselves
+                    # are left untouched.
+                    continue
                 if is_settlement:
-                    target["paid"] += settled_amount
+                    bucket["paid"] += settled_amount
                 else:
-                    target["payable"] += recognized_amount
+                    bucket["payable"] += recognized_amount
 
-        # Branch rows to display
-        if is_single_branch:
-            display_branches = selected_branches
-            include_unallocated = False
-        else:
-            display_branches = authorized_branches
-            # Company-wide/all-authorized totals must reconcile with GL including
-            # separately reported unallocated VAT.
-            include_unallocated = True
+        # Only actual authorized branches are displayed: all of them for the
+        # "All Branches" selection, or just the selected branch.
+        display_branches = (
+            selected_branches if is_single_branch else authorized_branches
+        )
 
         rows = []
         total_payable = 0.0
@@ -598,7 +597,7 @@ class KioCashDeposit(models.Model):
             return "unpaid", _("Unpaid")
 
         def _append_row(
-            name, values, row_id=None, is_unallocated=False, current_cash_balance=None
+            name, values, row_id=None, current_cash_balance=None
         ):
             nonlocal total_payable, total_paid, total_outstanding
             payable = values.get("payable", 0.0)
@@ -617,7 +616,6 @@ class KioCashDeposit(models.Model):
                 "current_cash_balance": current_cash_balance,
                 "status_key": status_key,
                 "status": status_label,
-                "is_unallocated": is_unallocated,
             })
 
         for branch in display_branches:
@@ -636,26 +634,6 @@ class KioCashDeposit(models.Model):
                 row_id=branch.id,
                 current_cash_balance=branch_cash,
             )
-
-        if include_unallocated:
-            unallocated_name = _("Unallocated VAT")
-            has_unallocated = any(
-                abs(unallocated.get(k, 0.0)) >= (currency.rounding or 0.01)
-                for k in ("payable", "paid")
-            )
-            if has_unallocated or (not search_term) or (search_term in unallocated_name.lower()):
-                if (not search_term) or (search_term in unallocated_name.lower()):
-                    # Avoid showing an empty unallocated row when there are no
-                    # amounts and a search term does not target it; but keep it
-                    # when it carries values (required for GL reconciliation).
-                    if has_unallocated or search_term in unallocated_name.lower():
-                        _append_row(
-                            unallocated_name,
-                            unallocated,
-                            row_id=False,
-                            is_unallocated=True,
-                            current_cash_balance=None,
-                        )
 
         # GL reconciliation reference (posted VAT payable account balance, liability-positive)
         gl_outstanding = 0.0

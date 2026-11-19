@@ -56,9 +56,12 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
 - Tabs (frontend switching):
   - **Branch-wise Summary** table (`Branch`, `Total VAT Payable`, `Paid VAT`,
     `Outstanding VAT`, `Current Cash Balance`, `Status`) with total row and status
-    badge styling (Paid/Partial/Unpaid); each branch shows its actual GL cash
-    balance, unallocated VAT shows a dash, and the total row matches the Current
-    Cash Balance KPI while deduplicating shared cash journals.
+    badge styling (Paid/Partial/Unpaid); only actual authorized/configured
+    branches are listed, each showing its actual GL cash balance. Unallocated
+    VAT is neither displayed nor counted in the KPI cards or total row, while its
+    accounting records remain untouched. The total row matches the Current Cash
+    Balance KPI while deduplicating shared cash journals, and every VAT KPI
+    equals the sum of the visible branch rows.
   - **Payment History** table (`Payment Reference`, `Payment Date`, `Branch`,
     `Payment Amount`, `Journal Entry`, `Status`) backed by
     `get_vat_payment_history_data()`: only posted/marked VAT payments of the

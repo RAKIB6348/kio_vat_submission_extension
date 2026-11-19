@@ -396,19 +396,60 @@ class TestVatDashboardCashKpi(TransactionCase):
             data["current_cash_balance"], before_total, places=2
         )
 
-    def test_unallocated_vat_row_has_no_cash_balance(self):
-        """Unallocated VAT has no branch cash account; its cash balance must be None."""
-        # Create unallocated VAT entry (no POS session/branch)
+    def test_unallocated_vat_is_not_displayed(self):
+        """Unallocated VAT has no configured branch, so it is not displayed."""
         self._post_entry([
             {"account_id": self.payable_account.id, "debit": 300.0, "name": "Direct"},
             {"account_id": self.vat_account.id, "credit": 300.0, "name": "Direct"},
         ], "Unallocated VAT entry")
         data = self._dashboard()
-        unallocated_rows = [r for r in data["rows"] if r.get("is_unallocated")]
-        self.assertTrue(unallocated_rows, "Unallocated VAT row should be present")
-        self.assertIsNone(
-            unallocated_rows[0]["current_cash_balance"],
-            "Unallocated VAT must have no attributable cash balance (displays dash)",
+        self.assertNotIn("Unallocated VAT", [r["branch"] for r in data["rows"]])
+        configured_ids = set(self.env["kio.cash.deposit.branch"].search([
+            ("company_id", "=", self.company.id),
+        ]).ids)
+        for row in data["rows"]:
+            # Only actual configured branches are displayed.
+            self.assertIn(row["id"], configured_ids)
+            self.assertNotIn("is_unallocated", row)
+
+    def test_unallocated_vat_excluded_from_kpis_and_totals(self):
+        """Unallocated VAT stays in the ledger but is excluded from figures."""
+        before = self._dashboard()
+        self._post_entry([
+            {"account_id": self.payable_account.id, "debit": 300.0, "name": "Direct"},
+            {"account_id": self.vat_account.id, "credit": 300.0, "name": "Direct"},
+        ], "Unallocated VAT entry")
+        after = self._dashboard()
+        self.assertAlmostEqual(
+            after["total_payable"], before["total_payable"], places=2
+        )
+        self.assertAlmostEqual(after["total_paid"], before["total_paid"], places=2)
+        self.assertAlmostEqual(after["outstanding"], before["outstanding"], places=2)
+        # The accounting record still exists: only reporting excludes it.
+        self.assertAlmostEqual(
+            after["gl_outstanding"], before["gl_outstanding"] + 300.0, places=2
+        )
+        self.assert_kpis_match_rows(after)
+
+    def test_kpis_match_branch_summary_totals(self):
+        """Every KPI equals the corresponding visible branch-row total."""
+        self.assert_kpis_match_rows(self._dashboard())
+        self._post_entry([
+            {"account_id": self.payable_account.id, "debit": 300.0, "name": "Direct"},
+            {"account_id": self.vat_account.id, "credit": 300.0, "name": "Direct"},
+        ], "Unallocated VAT entry")
+        self.assert_kpis_match_rows(self._dashboard())
+
+    def assert_kpis_match_rows(self, data):
+        rows = data["rows"]
+        self.assertAlmostEqual(
+            data["total_payable"], sum(r["total_payable"] for r in rows), places=2
+        )
+        self.assertAlmostEqual(
+            data["total_paid"], sum(r["paid_vat"] for r in rows), places=2
+        )
+        self.assertAlmostEqual(
+            data["outstanding"], sum(r["outstanding_vat"] for r in rows), places=2
         )
 
     def test_branch_without_cash_journal_displays_zero(self):
@@ -463,10 +504,25 @@ class TestVatDashboardCashKpi(TransactionCase):
             "company_ids": [Command.set(self.company.ids)],
         })
         data = self.env(user=manager)["kio.cash.deposit"].get_vat_payment_dashboard_data()
-        branch_rows = [r for r in data["rows"] if not r.get("is_unallocated")]
+        branch_rows = data["rows"]
         self.assertEqual(len(branch_rows), 1)
         self.assertEqual(branch_rows[0]["id"], self.branch_b.id)
         self.assertAlmostEqual(
             branch_rows[0]["current_cash_balance"], 2500.0, places=2
         )
         self.assertAlmostEqual(data["current_cash_balance"], 2500.0, places=2)
+
+    def test_all_branches_option_lists_only_authorized_active_branches(self):
+        """The All Branches selection exposes only actual authorized branches."""
+        inactive = self.env["kio.cash.deposit.branch"].create({
+            "name": "VAT Cash KPI Inactive",
+            "company_id": self.company.id,
+            "active": False,
+        })
+        data = self._dashboard()
+        option_ids = {b["id"] for b in data["branch_options"]["branches"]}
+        self.assertIn(self.branch_a.id, option_ids)
+        self.assertIn(self.branch_b.id, option_ids)
+        self.assertNotIn(inactive.id, option_ids)
+        # "All Branches" renders exactly those configured branches.
+        self.assertEqual({r["id"] for r in data["rows"]}, option_ids)

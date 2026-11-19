@@ -87,25 +87,19 @@ export class VatPaymentPage extends Component {
                 cash: Number(data.current_cash_balance || 0),
             };
             const rows = Array.isArray(data.rows) ? data.rows : [];
-            this.state.branchRows = rows.map((row, index) => {
-                let cashDisplay = "—";
-                if (
+            this.state.branchRows = rows.map((row) => {
+                const hasCash =
                     row.current_cash_balance !== null &&
-                    row.current_cash_balance !== undefined &&
-                    !row.is_unallocated
-                ) {
-                    cashDisplay = this.formatAmount(row.current_cash_balance);
-                }
+                    row.current_cash_balance !== undefined;
                 return {
-                    key:
-                        row.id !== false && row.id !== null
-                            ? `branch_${row.id}`
-                            : `unallocated_${index}`,
+                    key: `branch_${row.id}`,
                     branch: row.branch || "",
                     total_payable: this.formatAmount(row.total_payable),
                     paid_vat: this.formatAmount(row.paid_vat),
                     outstanding_vat: this.formatAmount(row.outstanding_vat),
-                    current_cash_balance: cashDisplay,
+                    current_cash_balance: hasCash
+                        ? this.formatAmount(row.current_cash_balance)
+                        : "—",
                     status_key: row.status_key || "unpaid",
                     status: row.status || "Unpaid",
                 };
