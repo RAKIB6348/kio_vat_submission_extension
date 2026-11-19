@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# KIO VAT payment register wizard — Phases 1, 2 and 3.
+
+import hashlib
 
 from odoo import Command, api, fields, models, _
 from odoo.exceptions import UserError
@@ -337,10 +340,212 @@ class AccountPaymentRegister(models.TransientModel):
             wizard.payment_difference = 0.0
         super(AccountPaymentRegister, self - vat_dashboard)._compute_payment_difference()
 
+    # ------------------------------------------------------------------
+    # Phase 3 — validated VAT payment creation and posting
+    # ------------------------------------------------------------------
+    def _kio_vat_payment_permission(self):
+        self.env["kio.cash.deposit"]._check_cash_deposit_access()
+        if not self.env["account.payment"].check_access_rights(
+            "create", raise_exception=False
+        ):
+            raise UserError(_(
+                "You do not have permission to create VAT payments. "
+                "Ask your Accounting administrator for payment rights."
+            ))
+
+    def _validate_kio_vat_payment(self):
+        """Recompute every server-side constraint immediately before posting."""
+        self.ensure_one()
+        self._kio_vat_payment_permission()
+        # ``_origin`` makes this work for both saved wizards and in-memory
+        # (NewId) wizards used by onchange/tests.
+        company = (self.company_id or self.env.company)._origin
+        branch = self.kio_vat_branch_id._origin
+        journal = self.journal_id._origin
+        method = self.payment_method_line_id._origin
+        currency = (self.currency_id or company.currency_id)._origin
+
+        if not branch:
+            raise UserError(_("Select a branch before creating a VAT payment."))
+        if branch not in self._get_vat_payment_authorized_branches(company=company):
+            raise UserError(_("You are not authorized to pay VAT for this branch."))
+        if branch.sudo().company_id != company:
+            raise UserError(_("The selected branch does not belong to the payment company."))
+        if (not journal or not journal.active or journal.type != "cash"
+                or journal.company_id != company):
+            raise UserError(_("Select a valid cash journal for the selected branch."))
+        if branch.sudo().branch_cash_account_id != journal:
+            raise UserError(_(
+                "The selected journal is not the configured cash journal of this branch."
+            ))
+
+        if (not method or method.journal_id != journal
+                or method.payment_type != "outbound" or method.code != "manual"):
+            raise UserError(_(
+                "Select a valid Manual outbound payment method for this journal."
+            ))
+        if self.payment_type != "outbound":
+            raise UserError(_("A VAT payment must be an outbound payment."))
+        expected_currency = journal.currency_id or company.currency_id
+        if not currency or currency != expected_currency or currency != company.currency_id:
+            raise UserError(_("The journal, payment and company currencies must be consistent."))
+
+        # A direct cash settlement is only safe when the payment credits the
+        # branch cash account itself. A separate clearing account would need an
+        # additional bank-statement reconciliation workflow.
+        outstanding_account = (
+            method.payment_account_id
+            or company.account_journal_payment_credit_account_id
+        )
+        if not outstanding_account:
+            raise UserError(_(
+                "No Outstanding Payments Account is configured for this "
+                "payment method or company."
+            ))
+        if outstanding_account != journal.default_account_id:
+            raise UserError(_(
+                "This journal uses a separate Outstanding Payments Account. "
+                "Direct VAT cash settlement is not available for this configuration."
+            ))
+
+        amount = company.currency_id.round(self.amount or 0.0)
+        if company.currency_id.compare_amounts(amount, 0.0) <= 0:
+            raise UserError(_("The VAT payment amount must be greater than zero."))
+
+        outstanding = self._get_vat_branch_outstanding_amount(
+            branch, company, currency, self.payment_date
+        )
+        if company.currency_id.compare_amounts(amount, outstanding) > 0:
+            raise UserError(_(
+                "The payment amount exceeds the outstanding VAT of this branch."
+            ))
+        cash = self.env["kio.cash.deposit"]._get_cash_journal_balance(
+            journal, company=company
+        )
+        if company.currency_id.compare_amounts(amount, cash) > 0:
+            raise UserError(_(
+                "The branch cash account does not have enough balance for this payment."
+            ))
+
+        vat_account = self.env["account.payment"]._kio_vat_payable_account(
+            company, required=True
+        )
+        date = self.payment_date or fields.Date.context_today(self)
+        locks = company._get_violated_lock_dates(date, False)
+        if locks:
+            raise UserError(_(
+                "The payment date is inside an accounting lock date (%(date)s, %(kind)s).",
+                date=locks[0][0], kind=locks[0][1],
+            ))
+
+        # The key deliberately excludes the (recomputed) outstanding amount so
+        # that two identical requests within the same wizard state are treated
+        # as one submission. A client may supply its own key for intentional
+        # repeat payments of the same amount on the same day.
+        key_source = "|".join([
+            str(company.id), str(branch.id), str(journal.id),
+            f"{amount:.4f}", fields.Date.to_string(date),
+            self.env.context.get("kio_vat_payment_idempotency_key", ""),
+        ])
+        return {
+            "company": company,
+            "branch": branch,
+            "journal": journal,
+            "method": method,
+            "currency": currency,
+            "vat_account": vat_account,
+            "amount": amount,
+            "date": date,
+            "outstanding": outstanding,
+            "key": hashlib.sha256(key_source.encode("utf-8")).hexdigest(),
+        }
+
+    @staticmethod
+    def _kio_vat_success_action(payment):
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("VAT Payment Posted"),
+                "message": _("VAT payment %s has been posted successfully.", payment.name),
+                "type": "success",
+                "next": {
+                    "type": "ir.actions.act_window",
+                    "name": _("VAT Payment"),
+                    "res_model": "account.payment",
+                    "view_mode": "form",
+                    # The "next" action of a display_notification is passed
+                    # straight to doAction(), which requires explicit views.
+                    "views": [[False, "form"]],
+                    "res_id": payment.id,
+                    "context": {"kio_vat_payment_history": True},
+                },
+            },
+        }
+
+    def _create_kio_vat_payment(self):
+        self.ensure_one()
+        # Validate once for a clear error, then serialize per branch and
+        # validate again against freshly recomputed VAT/cash availability.
+        self._validate_kio_vat_payment()
+        branch = self.kio_vat_branch_id._origin
+        self.env.cr.execute(
+            "SELECT pg_advisory_xact_lock(%s, %s)", (0x4B4956, branch.id)
+        )
+        # Validation always re-reads outstanding VAT and cash from the database,
+        # so the second pass sees the state committed by the competing request.
+        data = self._validate_kio_vat_payment()
+        company = data["company"]
+        Payment = self.env["account.payment"]
+
+        existing = Payment.search([
+            ("kio_vat_idempotency_key", "=", data["key"]),
+            ("company_id", "=", company.id),
+        ], limit=1)
+        if existing:
+            return self._kio_vat_success_action(existing)
+
+        payment = Payment.create({
+            "payment_type": "outbound",
+            "partner_type": "supplier",
+            "partner_id": False,
+            "amount": data["amount"],
+            "currency_id": data["currency"].id,
+            "date": data["date"],
+            "journal_id": data["journal"].id,
+            "payment_method_line_id": data["method"].id,
+            "company_id": company.id,
+            "ref": self.communication or f"VAT Payment - {data['branch'].name}",
+            "is_kio_vat_payment": True,
+            "kio_vat_branch_id": data["branch"].id,
+            "kio_vat_idempotency_key": data["key"],
+            "destination_account_id": data["vat_account"].id,
+        })
+        payment.action_post()
+
+        # Verify the single, balanced VAT settlement entry before committing.
+        move = payment.move_id
+        debit_lines = move.line_ids.filtered(
+            lambda line: line.account_id == data["vat_account"]
+        )
+        credit_lines = move.line_ids.filtered(
+            lambda line: line.account_id == data["journal"].default_account_id
+        )
+        if (move.state != "posted" or len(debit_lines) != 1 or len(credit_lines) != 1
+                or len(move.line_ids) != 2
+                or company.currency_id.compare_amounts(
+                    debit_lines[:1].balance, data["amount"]
+                ) != 0
+                or company.currency_id.compare_amounts(
+                    credit_lines[:1].balance, -data["amount"]
+                ) != 0):
+            raise UserError(_(
+                "The VAT payment did not produce the expected balanced "
+                "settlement entry. Nothing was recorded."
+            ))
+        return self._kio_vat_success_action(payment)
+
     def action_create_payments(self):
         if self.env.context.get("kio_vat_payment_dashboard"):
-            raise UserError(_(
-                "VAT payment confirmation is not available yet. "
-                "The VAT payment accounting workflow will be implemented in a future phase."
-            ))
+            return self._create_kio_vat_payment()
         return super().action_create_payments()

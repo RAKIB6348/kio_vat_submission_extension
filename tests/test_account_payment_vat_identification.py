@@ -186,10 +186,21 @@ class TestAccountPaymentVatIdentification(TransactionCase):
         self.assertIn("kio_vat_payment_history", view.arch_db)
 
     # ------------------------------------------------------------------
-    # Existing Create Payment blocker
+    # Phase 3: the old "not available yet" blocker is gone
     # ------------------------------------------------------------------
-    def test_create_payment_blocker_is_still_active(self):
-        with self.assertRaises(UserError):
-            self.env["account.payment.register"].with_context(
-                kio_vat_payment_dashboard=True
-            ).action_create_payments()
+    def test_vat_payment_workflow_is_enabled(self):
+        model = self.env["account.payment.register"].with_context(
+            kio_vat_payment_dashboard=True
+        )
+        wizard = model.new({
+            "company_id": self.company.id,
+            "payment_type": "outbound",
+            "kio_vat_branch_id": self.branch_a.id,
+            "amount": 0.0,
+        })
+        wizard._compute_available_journal_ids()
+        wizard._compute_journal_id()
+        wizard._compute_payment_method_line_id()
+        with self.assertRaises(UserError) as ctx:
+            wizard.action_create_payments()
+        self.assertNotIn("not available yet", str(ctx.exception))

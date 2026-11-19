@@ -444,32 +444,30 @@ class KioCashDeposit(models.Model):
         return mapping
 
     @api.model
-    def _is_vat_settlement_move(self, move):
-        """Return True only for verified posted VAT settlement moves.
-
-        No VAT settlement/payment workflow is implemented in this phase, so no
-        moves are treated as verified settlements (Total Paid VAT remains 0)
-        unless an explicit future marker is present.
-        """
+    def _kio_vat_settlement_payment(self, move):
+        """Return the posted VAT payment linked to ``move``, if any."""
         if not move:
-            return False
+            return self.env["account.payment"]
         move_sudo = move.sudo()
-        # Defensive support for future explicit VAT payment identifiers.
-        payment_fields = ("is_kio_vat_payment", "kio_is_vat_payment", "vat_payment")
         for field_name in ("payment_id", "payment_ids"):
             if field_name in move_sudo._fields:
                 payments = move_sudo[field_name]
                 for payment in payments.sudo():
-                    if payment._name != "account.payment":
-                        continue
-                    if getattr(payment, "state", False) != "posted":
-                        continue
-                    for pfield in payment_fields:
-                        if pfield in payment._fields and payment[pfield]:
-                            return True
-        if "is_kio_vat_payment" in move_sudo._fields and move_sudo.is_kio_vat_payment:
-            return True
-        return False
+                    if (payment._name == "account.payment"
+                            and "is_kio_vat_payment" in payment._fields
+                            and payment.is_kio_vat_payment
+                            and payment.state == "posted"):
+                        return payment
+        return self.env["account.payment"]
+
+    @api.model
+    def _is_vat_settlement_move(self, move):
+        """Only posted, explicitly marked VAT settlement payments qualify.
+
+        Ordinary refunds/debits of the VAT account never carry the marker, so
+        they are never counted as payments.
+        """
+        return bool(self._kio_vat_settlement_payment(move))
 
     @api.model
     def _resolve_vat_move_branch_id(self, move, branch_by_config_id):
@@ -477,6 +475,11 @@ class KioCashDeposit(models.Model):
         if not move:
             return False
         move_sudo = move.sudo()
+        # A posted VAT settlement is attributed to the branch recorded on the
+        # payment itself; POS attribution is only a fallback for tax moves.
+        payment = self._kio_vat_settlement_payment(move)
+        if payment and payment.kio_vat_branch_id:
+            return payment.kio_vat_branch_id.id
         config_ids = set()
 
         # POS closing entries: pos.session.move_id -> config_id

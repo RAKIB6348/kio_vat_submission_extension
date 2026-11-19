@@ -241,8 +241,9 @@ class TestVatPaymentJournalSelection(TransactionCase):
             self.assertFalse(wizard.kio_vat_journal_warning)
             self.assertFalse(wizard.kio_vat_branch_id)
 
-    def test_create_payment_is_still_blocked(self):
-        with self.assertRaises(UserError):
-            self.env["account.payment.register"].with_context(
-                kio_vat_payment_dashboard=True
-            ).action_create_payments()
+    def test_old_create_payment_blocker_is_removed(self):
+        wizard = self._apply_computes(self._wizard(kio_vat_branch_id=self.branch_a.id))
+        wizard.amount = 0.0
+        with self.assertRaises(UserError) as ctx:
+            wizard.action_create_payments()
+        self.assertNotIn("not available yet", str(ctx.exception))

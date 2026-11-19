@@ -59,16 +59,16 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
     `Payment Amount`, `Payment Journal`, `Challan Number`, `Status`) with empty
     state when no records are available.
 
-**New Payment (current phase):**
+**New Payment:**
 - The **+ New Payment** button opens the standard Odoo Register Payment form
   (`account.view_account_payment_register_form`, `account.payment.register`,
   form, `target="new"`), resolved by XML ID.
 - A module-scoped initialization path (`kio_vat_payment_dashboard` context)
   allows the standard wizard to open from this dashboard without
   invoice/journal-item context and without fake accounting records.
-- Payment confirmation is blocked in this dashboard flow until the VAT payment
-  accounting workflow is implemented (no payments are created/posted). Standard
-  normal invoice/journal-item register-payment behavior remains unchanged.
+- **Phase 3:** Create Payment now creates and posts one validated outbound VAT
+  payment (full or partial) through a dedicated workflow. Standard normal
+  invoice/journal-item register-payment behavior remains unchanged.
 
 **Phase 2 — automatic branch cash journal and memo:**
 - Selecting a branch reuses `kio.cash.deposit.branch.branch_cash_account_id`
@@ -87,6 +87,21 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
 - The **Recipient Bank Account** field is hidden in the VAT dashboard flow;
   normal customer/vendor payment forms keep Odoo's standard behaviour.
 
+**Phase 3 — VAT settlement posting:**
+- Create Payment in the VAT context validates (on the server, immediately before
+  posting) access rights, branch authorization/company, journal/method
+  configuration, amount > 0 and ≤ freshly recomputed outstanding VAT, available
+  cash, VAT Payable account configuration, currency consistency and accounting
+  lock dates.
+- One outbound `account.payment` is created and posted with `is_kio_vat_payment`
+  and `kio_vat_branch_id` set. Its single payment move debits 200904 and credits
+  the branch cash account. A branch-level advisory lock plus a deterministic
+  idempotency key serialize and de-duplicate submissions; any failure rolls
+  back atomically. Posted VAT payments cannot be edited, cancelled or deleted.
+- Posted settlements are attributed to their branch in the VAT summary, so
+  Total Paid VAT increases, Outstanding VAT decreases and the GL reconciles.
+  Current Cash Balance falls automatically through the posted credit line.
+
 **Accounting configuration findings (read-only inspection, live DB):**
 - All 16 active branches map to a `cash` journal (companies 1, no journal
   currency). Each journal's default liquidity account equals its Manual
@@ -100,9 +115,13 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
   defaults to the partner's payable account (or the first `liability_payable`
   account, 200101, when no partner is set). That is **not** the configured VAT
   Payable account **200904** (`liability_non_current`, reconcile), and 200904
-  is outside the standard `destination_account_id` domain. A future VAT
-  settlement workflow must therefore explicitly decide how the debit side is
-  mapped to 200904; no accounting configuration was changed here.
+  is outside the standard `destination_account_id` domain.
+- **Phase 3 resolution:** inspection confirmed that Odoo 17 has no Python/SQL
+  constraint enforcing the UI domain on `destination_account_id`. The scoped
+  VAT workflow passes 200904 explicitly as the destination account of a payment
+  move (`move_type = entry`), producing Debit 200904 / Credit branch cash
+  account. No account type, journal configuration or accounting setting was
+  changed. See `docs/VAT_PAYMENT_PHASE_3_REPORT.md`.
 
 ### 3. Payment History menu
 Adds a **Payment History** menu (after **VAT Payment**, before **Deposits**)
@@ -147,11 +166,14 @@ Under `kio_cash_deposit.menu_kio_cash_deposit_root` (base menus unchanged):
 ## Implementation notes
 - **Scope:** implemented entirely in `kio_vat_submission_extension`; does not
   modify `kio_cash_deposit` or standard Odoo accounting modules.
-- **Backend:** `models/cash_deposit.py` extends dashboard RPC/KPI logic;
+- **Backend:** `models/cash_deposit.py` extends dashboard RPC/KPI logic and
+  attributes posted settlements to their branch;
   `models/account_payment_register.py` provides the scoped dashboard-only
-  `account.payment.register` initialization/blocking behavior;
+  `account.payment.register` initialization, journal/memo selection and the
+  validated VAT payment creation workflow;
   `models/account_payment.py` adds the VAT identification fields, their access
-  guards, and the server-side Payment History scoping.
+  guards, the VAT Payable destination account, server-side Payment History
+  scoping and posted-payment protection.
 - **Frontend:** dashboard KPI patch and VAT Payment page assets in
   `static/src/{js,xml,scss}`; VAT Payment page styling is scoped to avoid
   impacting existing dashboard layout.
@@ -164,12 +186,16 @@ Under `kio_cash_deposit.menu_kio_cash_deposit_root` (base menus unchanged):
   POS cash eligibility and allocation, refunds/withdrawals/opening balances,
   branch scoping, and access rights.
 - Backend: `tests/test_account_payment_vat_identification.py` (`post_install`) —
-  field definitions/defaults, marking restrictions, Payment History scoping,
-  Branch column and the retained Create Payment blocker.
+  field definitions/defaults, marking restrictions, Payment History scoping and
+  Branch column.
 - Backend: `tests/test_vat_payment_journal_selection.py` (`post_install`) —
   branch→journal/method/memo selection, branch change and clearing, dashboard
   preselection, missing-journal warning, journal restriction, bank-account
-  hiding, normal wizard isolation and the retained blocker.
+  hiding, and normal wizard isolation.
+- Backend: `tests/test_kio_vat_payment_posting.py` (`post_install`) — full and
+  partial postings, exact journal entry, validation failures, multi-branch,
+  idempotency, rollback, posted-payment protection, history, VAT/GL/cash
+  reconciliation and normal payment regression.
 - Frontend: `static/tests/cash_deposit_kpi_tests.js` (QUnit) — dashboard KPI
   card order, rendering, and fallback behavior.
 
