@@ -337,6 +337,7 @@ class TestKioVatPaymentPosting(TransactionCase):
         self.assertEqual(second["params"]["next"]["res_id"], first_id)
         self.assertEqual(self.env["account.payment"].search_count([
             ("is_kio_vat_payment", "=", True),
+            ("kio_vat_branch_id", "=", self.branch_a.id),
         ]), 1)
 
     def test_posting_failure_rolls_back_payment(self):
@@ -353,6 +354,7 @@ class TestKioVatPaymentPosting(TransactionCase):
                     wizard.action_create_payments()
         self.assertFalse(self.env["account.payment"].search([
             ("is_kio_vat_payment", "=", True),
+            ("kio_vat_branch_id", "=", self.branch_a.id),
         ]))
 
     def test_posted_vat_payment_is_protected(self):

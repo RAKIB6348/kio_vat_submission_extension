@@ -245,10 +245,141 @@ class TestVatDashboardCashKpi(TransactionCase):
     def test_kpi_card_is_declared_in_frontend_assets(self):
         root = Path(__file__).resolve().parents[1] / "static" / "src"
         js = (root / "js" / "vat_payment_page.js").read_text()
+        xml = (root / "xml" / "vat_payment_page.xml").read_text()
         scss = (root / "scss" / "vat_payment_page.scss").read_text()
         self.assertIn('label: "Current Cash Balance"', js)
-        self.assertIn('icon: "fa fa-wallet"', js)
+        self.assertIn('icon: "fa fa-money"', js)
         self.assertIn("data.current_cash_balance", js)
         self.assertIn("repeat(4, minmax(0, 1fr))", scss)
         self.assertIn("kio-vat-payment__kpi-card--cash", scss)
         self.assertIn("border-top: 3px solid var(--kio-vat-blue)", scss)
+
+        # Table template column sequence and bindings
+        self.assertIn('<th class="is-money">Current Cash Balance</th>', xml)
+        self.assertIn('<td class="is-money"><t t-esc="row.current_cash_balance"/></td>', xml)
+        self.assertIn('<td class="is-money"><t t-esc="summaryTotals.cash"/></td>', xml)
+
+        # Verify sequence: Branch -> Total VAT Payable -> Paid VAT -> Outstanding VAT -> Current Cash Balance -> Status
+        idx_branch = xml.find("<th>Branch</th>")
+        idx_payable = xml.find('<th class="is-money">Total VAT Payable</th>')
+        idx_paid = xml.find('<th class="is-money">Paid VAT</th>')
+        idx_outstanding = xml.find('<th class="is-money">Outstanding VAT</th>')
+        idx_cash = xml.find('<th class="is-money">Current Cash Balance</th>')
+        idx_status = xml.find("<th>Status</th>")
+        self.assertTrue(
+            -1 < idx_branch < idx_payable < idx_paid < idx_outstanding < idx_cash < idx_status,
+            "Column sequence must be Branch, Total VAT Payable, Paid VAT, Outstanding VAT, Current Cash Balance, Status",
+        )
+
+    # ------------------------------------------------------------------
+    # Branch-wise Summary Table: Current Cash Balance
+    # ------------------------------------------------------------------
+    def test_branch_summary_rows_contain_actual_cash_balance(self):
+        data = self._dashboard()
+        rows_by_id = {r["id"]: r for r in data["rows"] if r.get("id")}
+        self.assertIn(self.branch_a.id, rows_by_id)
+        self.assertAlmostEqual(
+            rows_by_id[self.branch_a.id]["current_cash_balance"], 4000.0, places=2
+        )
+        self.assertIn(self.branch_b.id, rows_by_id)
+        self.assertAlmostEqual(
+            rows_by_id[self.branch_b.id]["current_cash_balance"], 2500.0, places=2
+        )
+
+    def test_shared_cash_journal_does_not_duplicate_total_cash(self):
+        """When branches share a cash journal, each branch row reflects the
+        journal's actual balance, but the total row and KPI deduplicate to match
+        the underlying distinct GL accounts."""
+        before_total = self._dashboard()["current_cash_balance"]
+        branch_c = self.env["kio.cash.deposit.branch"].create({
+            "name": "VAT Cash KPI C (Shared with A)",
+            "company_id": self.company.id,
+            "branch_cash_account_id": self.journal_a.id,
+        })
+        data = self._dashboard()
+        rows_by_id = {r["id"]: r for r in data["rows"] if r.get("id")}
+        self.assertAlmostEqual(
+            rows_by_id[self.branch_a.id]["current_cash_balance"], 4000.0, places=2
+        )
+        self.assertAlmostEqual(
+            rows_by_id[branch_c.id]["current_cash_balance"], 4000.0, places=2
+        )
+        # Total cash must NOT duplicate journal_a (total remains exactly before_total, not before + 4000)
+        self.assertAlmostEqual(
+            data["current_cash_balance"], before_total, places=2
+        )
+
+    def test_unallocated_vat_row_has_no_cash_balance(self):
+        """Unallocated VAT has no branch cash account; its cash balance must be None."""
+        # Create unallocated VAT entry (no POS session/branch)
+        self._post_entry([
+            {"account_id": self.payable_account.id, "debit": 300.0, "name": "Direct"},
+            {"account_id": self.vat_account.id, "credit": 300.0, "name": "Direct"},
+        ], "Unallocated VAT entry")
+        data = self._dashboard()
+        unallocated_rows = [r for r in data["rows"] if r.get("is_unallocated")]
+        self.assertTrue(unallocated_rows, "Unallocated VAT row should be present")
+        self.assertIsNone(
+            unallocated_rows[0]["current_cash_balance"],
+            "Unallocated VAT must have no attributable cash balance (displays dash)",
+        )
+
+    def test_branch_without_cash_journal_displays_zero(self):
+        """A branch with no cash journal configured reports 0.0 cash balance."""
+        branch_empty = self.env["kio.cash.deposit.branch"].create({
+            "name": "VAT Cash KPI No Cash",
+            "company_id": self.company.id,
+            "branch_cash_account_id": False,
+        })
+        data = self._dashboard()
+        rows_by_id = {r["id"]: r for r in data["rows"] if r.get("id")}
+        self.assertIn(branch_empty.id, rows_by_id)
+        self.assertEqual(rows_by_id[branch_empty.id]["current_cash_balance"], 0.0)
+
+    def test_negative_cash_balance_displayed_accurately(self):
+        """Negative balances on cash journals are preserved accurately."""
+        # Overdraw journal_b by crediting 3500 (balance was 2500 -> net -1000)
+        self._post_entry([
+            {"account_id": self.payable_account.id, "debit": 3500.0, "name": "Overdraw"},
+            {"account_id": self.journal_b.default_account_id.id, "credit": 3500.0, "name": "Overdraw"},
+        ], "Overdraw movement")
+        data = self._dashboard()
+        rows_by_id = {r["id"]: r for r in data["rows"] if r.get("id")}
+        self.assertAlmostEqual(
+            rows_by_id[self.branch_b.id]["current_cash_balance"], -1000.0, places=2
+        )
+
+    def test_branch_filter_updates_table_rows_and_total(self):
+        """Filtering by branch updates rows and total to that branch only."""
+        data_a = self._dashboard(branch_id=self.branch_a.id)
+        self.assertEqual(len(data_a["rows"]), 1)
+        self.assertEqual(data_a["rows"][0]["id"], self.branch_a.id)
+        self.assertAlmostEqual(
+            data_a["rows"][0]["current_cash_balance"], 4000.0, places=2
+        )
+        self.assertAlmostEqual(data_a["current_cash_balance"], 4000.0, places=2)
+
+    def test_manager_sees_only_assigned_branch_in_summary_rows(self):
+        """A manager user only sees their assigned branch in the summary rows."""
+        manager = self.env["res.users"].create({
+            "name": "VAT Cash Row Manager",
+            "login": "vat_cash_row_manager",
+            "groups_id": [
+                Command.set([
+                    self.env.ref("base.group_user").id,
+                    self.env.ref(
+                        "kio_cash_deposit.group_kio_cash_deposit_user"
+                    ).id,
+                ]),
+            ],
+            "kio_cash_deposit_branch_ids": [Command.set(self.branch_b.ids)],
+            "company_ids": [Command.set(self.company.ids)],
+        })
+        data = self.env(user=manager)["kio.cash.deposit"].get_vat_payment_dashboard_data()
+        branch_rows = [r for r in data["rows"] if not r.get("is_unallocated")]
+        self.assertEqual(len(branch_rows), 1)
+        self.assertEqual(branch_rows[0]["id"], self.branch_b.id)
+        self.assertAlmostEqual(
+            branch_rows[0]["current_cash_balance"], 2500.0, places=2
+        )
+        self.assertAlmostEqual(data["current_cash_balance"], 2500.0, places=2)

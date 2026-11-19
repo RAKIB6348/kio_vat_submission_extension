@@ -34,7 +34,10 @@ export class VatPaymentPage extends Component {
     }
 
     formatAmount(amount) {
-        const value = Number(amount || 0);
+        let value = Number(amount || 0);
+        if (Math.abs(value) < 0.00001) {
+            value = 0;
+        }
         const formatted = new Intl.NumberFormat("en-US", {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
@@ -83,15 +86,29 @@ export class VatPaymentPage extends Component {
                 cash: Number(data.current_cash_balance || 0),
             };
             const rows = Array.isArray(data.rows) ? data.rows : [];
-            this.state.branchRows = rows.map((row, index) => ({
-                key: row.id !== false && row.id !== null ? `branch_${row.id}` : `unallocated_${index}`,
-                branch: row.branch || "",
-                total_payable: this.formatAmount(row.total_payable),
-                paid_vat: this.formatAmount(row.paid_vat),
-                outstanding_vat: this.formatAmount(row.outstanding_vat),
-                status_key: row.status_key || "unpaid",
-                status: row.status || "Unpaid",
-            }));
+            this.state.branchRows = rows.map((row, index) => {
+                let cashDisplay = "—";
+                if (
+                    row.current_cash_balance !== null &&
+                    row.current_cash_balance !== undefined &&
+                    !row.is_unallocated
+                ) {
+                    cashDisplay = this.formatAmount(row.current_cash_balance);
+                }
+                return {
+                    key:
+                        row.id !== false && row.id !== null
+                            ? `branch_${row.id}`
+                            : `unallocated_${index}`,
+                    branch: row.branch || "",
+                    total_payable: this.formatAmount(row.total_payable),
+                    paid_vat: this.formatAmount(row.paid_vat),
+                    outstanding_vat: this.formatAmount(row.outstanding_vat),
+                    current_cash_balance: cashDisplay,
+                    status_key: row.status_key || "unpaid",
+                    status: row.status || "Unpaid",
+                };
+            });
         } catch (error) {
             this.state.branches = [];
             this.state.branchRows = [];
@@ -127,7 +144,7 @@ export class VatPaymentPage extends Component {
             {
                 key: "cash",
                 label: "Current Cash Balance",
-                icon: "fa fa-wallet",
+                icon: "fa fa-money",
                 accent: "cash",
                 value: this.formatAmount(this.state.totals.cash),
             },
@@ -147,6 +164,7 @@ export class VatPaymentPage extends Component {
             payable: this.formatAmount(this.state.totals.payable),
             paid: this.formatAmount(this.state.totals.paid),
             outstanding: this.formatAmount(this.state.totals.outstanding),
+            cash: this.formatAmount(this.state.totals.cash),
         };
     }
 

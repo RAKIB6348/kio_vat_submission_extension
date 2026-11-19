@@ -121,6 +121,7 @@
                                         <th class="is-money">Total VAT Payable</th>
                                         <th class="is-money">Paid VAT</th>
                                         <th class="is-money">Outstanding VAT</th>
+                                        <th class="is-money">Current Cash Balance</th>
                                         <th>Status</th>
                                     </tr>
                                 </thead>
@@ -130,6 +131,7 @@
                                         <td class="is-money"><t t-esc="row.total_payable"/></td>
                                         <td class="is-money"><t t-esc="row.paid_vat"/></td>
                                         <td class="is-money"><t t-esc="row.outstanding_vat"/></td>
+                                        <td class="is-money"><t t-esc="row.current_cash_balance"/></td>
                                         <td>
                                             <span t-attf-class="kio-vat-payment__badge kio-vat-payment__badge--{{ row.status_key }}">
                                                 <t t-esc="row.status"/>
@@ -137,7 +139,7 @@
                                         </td>
                                     </tr>
                                     <tr t-if="!branchSummaryRows.length" class="kio-vat-payment__empty-row">
-                                        <td colspan="5">
+                                        <td colspan="6">
                                             <div class="kio-vat-payment__empty-state">
                                                 <i class="fa fa-folder-open-o" aria-hidden="true"/>
                                                 <p class="kio-vat-payment__empty-title">No branch VAT data available</p>
@@ -152,6 +154,7 @@
                                         <td class="is-money"><t t-esc="summaryTotals.payable"/></td>
                                         <td class="is-money"><t t-esc="summaryTotals.paid"/></td>
                                         <td class="is-money"><t t-esc="summaryTotals.outstanding"/></td>
+                                        <td class="is-money"><t t-esc="summaryTotals.cash"/></td>
                                         <td><span class="kio-vat-payment__total-status">—</span></td>
                                     </tr>
                                 </tfoot>

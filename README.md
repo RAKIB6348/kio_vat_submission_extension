@@ -47,15 +47,18 @@ dashboard, before **Deposits**) opening a client-action dashboard page:
 
 - Header: **VAT Payment** title and **+ New Payment** button.
 - Four equal-width KPI cards in one row: **Total VAT Payable**, **Total Paid
-  VAT**, **Outstanding VAT**, **Current Cash Balance** (blue top border, wallet
-  icon, BDT). All values come from backend RPCs; no placeholders.
+  VAT**, **Outstanding VAT**, **Current Cash Balance** (blue top border, money
+  icon `fa fa-money` with blue icon color and light blue background, BDT). All
+  values come from backend RPCs; no placeholders.
 - Filter toolbar (frontend UI state): Branch (defaults to *All Branches*, loaded
   read-only from existing `kio.cash.deposit.get_cash_deposit_branch_options`
   when available), date range, search, and reset filters.
 - Tabs (frontend switching):
   - **Branch-wise Summary** table (`Branch`, `Total VAT Payable`, `Paid VAT`,
-    `Outstanding VAT`, `Status`) with total row and status badge styling
-    (Paid/Partial/Unpaid); no fabricated records.
+    `Outstanding VAT`, `Current Cash Balance`, `Status`) with total row and status
+    badge styling (Paid/Partial/Unpaid); each branch shows its actual GL cash
+    balance, unallocated VAT shows a dash, and the total row matches the Current
+    Cash Balance KPI while deduplicating shared cash journals.
   - **Payment History** table (`Payment Reference`, `Payment Date`, `Branch`,
     `Payment Amount`, `Payment Journal`, `Challan Number`, `Status`) with empty
     state when no records are available.

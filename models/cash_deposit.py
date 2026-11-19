@@ -597,7 +597,9 @@ class KioCashDeposit(models.Model):
                 return "unpaid", _("Unpaid")
             return "unpaid", _("Unpaid")
 
-        def _append_row(name, values, row_id=None, is_unallocated=False):
+        def _append_row(
+            name, values, row_id=None, is_unallocated=False, current_cash_balance=None
+        ):
             nonlocal total_payable, total_paid, total_outstanding
             payable = values.get("payable", 0.0)
             paid = values.get("paid", 0.0)
@@ -612,6 +614,7 @@ class KioCashDeposit(models.Model):
                 "total_payable": payable,
                 "paid_vat": paid,
                 "outstanding_vat": outstanding,
+                "current_cash_balance": current_cash_balance,
                 "status_key": status_key,
                 "status": status_label,
                 "is_unallocated": is_unallocated,
@@ -622,7 +625,17 @@ class KioCashDeposit(models.Model):
             name = values.get("name") or branch.display_name
             if search_term and search_term not in (name or "").lower():
                 continue
-            _append_row(name, values, row_id=branch.id)
+            journal = branch.branch_cash_account_id
+            if journal and journal.type == "cash" and journal.company_id == company:
+                branch_cash = self._get_cash_journal_balance(journal, company=company)
+            else:
+                branch_cash = 0.0
+            _append_row(
+                name,
+                values,
+                row_id=branch.id,
+                current_cash_balance=branch_cash,
+            )
 
         if include_unallocated:
             unallocated_name = _("Unallocated VAT")
@@ -636,7 +649,13 @@ class KioCashDeposit(models.Model):
                     # amounts and a search term does not target it; but keep it
                     # when it carries values (required for GL reconciliation).
                     if has_unallocated or search_term in unallocated_name.lower():
-                        _append_row(unallocated_name, unallocated, row_id=False, is_unallocated=True)
+                        _append_row(
+                            unallocated_name,
+                            unallocated,
+                            row_id=False,
+                            is_unallocated=True,
+                            current_cash_balance=None,
+                        )
 
         # GL reconciliation reference (posted VAT payable account balance, liability-positive)
         gl_outstanding = 0.0
@@ -655,12 +674,17 @@ class KioCashDeposit(models.Model):
             if rg:
                 gl_outstanding = (rg[0].get("credit") or 0.0) - (rg[0].get("debit") or 0.0)
 
+        total_cash = self._get_vat_current_cash_balance(
+            branch_id=branch_id if is_single_branch else False
+        )
+
         return {
             "currency_symbol": currency.symbol or "",
             "currency_id": currency.id,
             "total_payable": total_payable,
             "total_paid": total_paid,
             "outstanding": total_outstanding,
+            "current_cash_balance": total_cash,
             "gl_outstanding": gl_outstanding,
             "rows": rows,
             "is_single_branch": is_single_branch,
