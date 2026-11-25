@@ -11,6 +11,6 @@
         parent="kio_cash_deposit.menu_kio_cash_deposit_root"
         action="action_kio_vat_payment_client"
         sequence="5"
-        groups="kio_cash_deposit.group_kio_cash_deposit_user"
+        groups="base.group_system,kio_branch_inventory.group_branch_inventory_user"
     />
 </odoo>

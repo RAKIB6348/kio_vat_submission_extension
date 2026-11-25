@@ -23,6 +23,7 @@ existing card design is reused.
     "website": "https://kendroo.io/",
     "depends": [
         "kio_cash_deposit",
+        "kio_branch_inventory",
     ],
     "data": [
         "views/vat_payment_views.xml",

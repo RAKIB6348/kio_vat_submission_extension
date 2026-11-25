@@ -37,6 +37,7 @@ import pytz
 from datetime import datetime, time
 
 from odoo import _, api, fields, models
+from odoo.exceptions import AccessError
 
 
 class KioCashDeposit(models.Model):
@@ -385,6 +386,31 @@ class KioCashDeposit(models.Model):
         return exact[:1] if exact else accounts[:1]
 
     @api.model
+    def _check_vat_payment_access(self):
+        if not (
+            self.env.user.has_group("base.group_system")
+            or self.env.user.has_group(
+                "kio_branch_inventory.group_branch_inventory_user"
+            )
+        ):
+            raise AccessError(_("You do not have access to VAT Payment."))
+
+    @api.model
+    def _get_vat_payment_branch_options(self):
+        self._check_vat_payment_access()
+        branches = self._get_authorized_vat_branches()
+        is_admin = self.env.user.has_group("base.group_system")
+        return {
+            "can_filter": is_admin,
+            "default_branch_ids": self._get_head_office_branch().ids if is_admin else branches.ids,
+            "branches": [
+                {"id": branch.id, "name": branch.display_name,
+                 "branch_cash_account_id": branch.branch_cash_account_id.id}
+                for branch in branches
+            ],
+        }
+
+    @api.model
     def _get_authorized_vat_branches(self, branch_id=False):
         """Authorized cash-deposit branches for the current user/company.
 
@@ -392,11 +418,12 @@ class KioCashDeposit(models.Model):
         - admin: all active branches in current company (optionally filtered),
         - manager: assigned active branches in current company only.
         """
-        self._check_cash_deposit_access()
+        self._check_vat_payment_access()
         company = self.env.company
         Branch = self.env["kio.cash.deposit.branch"].sudo()
         company_domain = [("active", "=", True), ("company_id", "=", company.id)]
-        if self._is_cash_deposit_admin():
+        if (self.env.user.has_group("base.group_system")
+                or self._is_cash_deposit_admin()):
             branches = Branch.search(company_domain, order="sequence, name, id")
         else:
             branches = self._get_user_cash_deposit_branches().sudo().filtered(
@@ -514,7 +541,7 @@ class KioCashDeposit(models.Model):
     def _get_vat_branch_summary_data(
         self, branch_id=False, date_from=False, date_to=False, search=False
     ):
-        self._check_cash_deposit_access()
+        self._check_vat_payment_access()
         company = self.env.company
         currency = company.currency_id
         vat_account = self._get_vat_payable_account(company)
@@ -673,8 +700,8 @@ class KioCashDeposit(models.Model):
     def get_vat_payment_dashboard_data(
         self, branch_id=False, date_from=False, date_to=False, search=False
     ):
-        self._check_cash_deposit_access()
-        branch_options = self.get_cash_deposit_branch_options()
+        self._check_vat_payment_access()
+        branch_options = self._get_vat_payment_branch_options()
         # Normalize branch filter against authorized options for managers/admins.
         allowed_ids = {b["id"] for b in branch_options.get("branches", [])}
         selected_branch_id = False
@@ -738,7 +765,7 @@ class KioCashDeposit(models.Model):
         exposed. sudo() is used only for the read; the domain is built from the
         caller's authorized branches, so access is still enforced server-side.
         """
-        self._check_cash_deposit_access()
+        self._check_vat_payment_access()
         company = self.env.company
         authorized = self._get_authorized_vat_branches()
         if branch_id and str(branch_id) != "all":

@@ -344,7 +344,7 @@ class AccountPaymentRegister(models.TransientModel):
     # Phase 3 — validated VAT payment creation and posting
     # ------------------------------------------------------------------
     def _kio_vat_payment_permission(self):
-        self.env["kio.cash.deposit"]._check_cash_deposit_access()
+        self.env["kio.cash.deposit"]._check_vat_payment_access()
         if not self.env["account.payment"].check_access_rights(
             "create", raise_exception=False
         ):

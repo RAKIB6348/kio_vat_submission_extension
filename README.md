@@ -370,10 +370,10 @@ payments keep Odoo's normal labels.
 
 ### 2.14 Access and multi-company behavior
 
-- All dashboard RPCs call `_check_cash_deposit_access()`; a user without the
-  Cash Deposit Manager group receives an `AccessError`.
-- Cash Deposit admins see all active branches in the current company.
-- Cash Deposit managers see only the branches assigned to them through
+- Cash Deposit dashboard RPCs call `_check_cash_deposit_access()`. VAT Payment
+  RPCs instead require Administrator or Branch Inventory User membership.
+- VAT Payment Administrators see all active branches in the current company.
+- VAT Payment Branch Inventory Users see only the branches assigned to them through
   `res.users.kio_cash_deposit_branch_ids`.
 - The branch field on `account.payment` uses `check_company=True`; validation
   rejects a branch from another company.
@@ -1241,19 +1241,19 @@ balance, but the total/KPI deduplicates the shared journal.
 ### 8.1 Security groups used
 
 This module **does not define new security groups, ACL rows or record rules**.
-It uses the groups and rules from `kio_cash_deposit` and standard Odoo
-accounting:
+It reuses the existing Odoo and branch inventory groups, and retains the
+cash-deposit branch assignments to scope the dashboard data:
 
 | Group | Technical id | Source | Meaning here |
 | --- | --- | --- | --- |
-| Cash Deposit Manager | `kio_cash_deposit.group_kio_cash_deposit_user` | `kio_cash_deposit` | Required for all VAT dashboard RPCs and menus; sees assigned branches |
-| Cash Deposit Admin | `kio_cash_deposit.group_kio_cash_deposit_admin` | `kio_cash_deposit` | Implies Manager; sees all active branches in the current company |
-| Internal User | `base.group_user` | Odoo base | Implied by Cash Deposit Manager |
+| Administrator | `base.group_system` | Odoo base | Can access the menu and RPCs; sees active branches in the current company |
+| Branch Inventory User | `kio_branch_inventory.group_branch_inventory_user` | `kio_branch_inventory` | Can access the menu and RPCs; branch results remain scoped to the user's assigned Cash Deposit branches |
+| Cash Deposit Manager | `kio_cash_deposit.group_kio_cash_deposit_user` | `kio_cash_deposit` | Supplies existing branch assignments used to scope Branch Inventory User dashboard data |
 | Billing / Accounting | `account.group_account_invoice` | Odoo accounting | Needed for standard `account.payment` create/post rights in many setups |
 
 ### 8.2 Capability matrix
 
-| Capability | Cash Deposit Manager | Cash Deposit Admin | Plain user |
+| Capability | Administrator | Branch Inventory User | Other users |
 | --- | --- | --- | --- |
 | Open VAT Payment menu | Yes | Yes | No menu; RPC raises AccessError |
 | View dashboard KPIs | Assigned branches | All active branches in current company | No |
@@ -1261,8 +1261,8 @@ accounting:
 | View Payment History | Assigned branches | All active branches | No |
 | Select a branch in the wizard | Only assigned | Any active branch in company | No |
 | Create/post a VAT payment | Only if accounting payment rights are also granted | Only if accounting payment rights are also granted | No |
-| Configure branch cash journals | Read-only (base ACL) | Yes (base admin ACL) | No |
-| Mark an arbitrary payment as VAT | Only with authorization | Yes within company | No |
+| Configure branch cash journals | Yes, subject to base ACL | Subject to base ACL | No VAT dashboard access |
+| Mark an arbitrary payment as VAT | Subject to existing payment authorization | Subject to existing payment authorization | No VAT dashboard access |
 | Cancel/delete a posted VAT payment | No | No | No |
 | Open linked journal entry | Subject to standard accounting access | Subject to standard accounting access | No |
 
@@ -1270,7 +1270,7 @@ accounting:
 
 The menus are only the first layer. The server enforces:
 
-- `_check_cash_deposit_access()` at the start of every dashboard/history RPC.
+- `_check_vat_payment_access()` at the start of every VAT dashboard/history RPC and before VAT payment creation. It allows only `base.group_system` and `kio_branch_inventory.group_branch_inventory_user`.
 - `_kio_vat_authorized_branches()` in payment marking constraints and history
   scoping.
 - `_validate_kio_vat_payment()` immediately before posting.
@@ -1278,7 +1278,7 @@ The menus are only the first layer. The server enforces:
 - `_check_kio_vat_payment_marking()` on create/write of VAT markers.
 - Standard `account.payment` ACL checks in `_kio_vat_payment_permission()`.
 
-A client cannot bypass branch or company restrictions by editing the action
+A client cannot bypass menu access or branch/company restrictions by editing the action
 domain, the wizard fields or the RPC arguments.
 
 ### 8.4 Record rules inherited from `kio_cash_deposit`
@@ -1590,7 +1590,8 @@ Phase 3 accounting design and verification.
 | `kio.cash.deposit.get_vat_payment_history_data` | `branch_id`, `date_from`, `date_to`, `search`, `limit` | Payment history rows and count |
 | `kio.cash.deposit._get_cash_journal_balance` | `journals`, `company` | GL balance (base helper, reused) |
 
-All public dashboard/history RPCs call `_check_cash_deposit_access()`.
+Cash Deposit dashboard RPCs use `_check_cash_deposit_access()`; VAT Payment
+dashboard/history RPCs use `_check_vat_payment_access()`.
 
 ### 11.6 Frontend components and assets
 
@@ -1649,7 +1650,8 @@ Reused base services:
 
 | Base service | How it is used |
 | --- | --- |
-| `_check_cash_deposit_access()` | Access gate for every dashboard/history RPC |
+| `_check_cash_deposit_access()` | Access gate for Cash Deposit dashboard/history RPCs |
+| `_check_vat_payment_access()` | Access gate for VAT Payment dashboard/history RPCs and payment creation |
 | `_is_cash_deposit_admin()` | Admin versus manager branch scope |
 | `_get_user_cash_deposit_branches()` | Manager branch assignment source |
 | `_get_cash_journal_balance()` | Current cash KPI and per-row cash balance |
