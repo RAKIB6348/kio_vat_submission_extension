@@ -302,6 +302,59 @@ class TestVatDashboardCashKpi(TransactionCase):
         ].get_vat_payment_history_data()["rows"]
         self.assertEqual([r["branch"] for r in manager_rows], ["VAT Cash KPI A"])
 
+    def test_journal_entry_access_by_role(self):
+        self._wizard(self.branch_a, 100.0).action_create_payments()
+        payment = self.env["account.payment"].search([
+            ("is_kio_vat_payment", "=", True),
+            ("kio_vat_branch_id", "=", self.branch_a.id),
+        ], limit=1)
+        self.assertTrue(payment.move_id)
+
+        # Administrator retains clickable move_id and can open the Journal Entry.
+        admin_data = self.env["kio.cash.deposit"].get_vat_payment_history_data(
+            branch_id=self.branch_a.id
+        )
+        self.assertTrue(admin_data["can_open_journal_entry"])
+        admin_row = admin_data["rows"][0]
+        self.assertEqual(admin_row["move_id"], payment.move_id.id)
+        self.assertEqual(admin_row["move_name"], payment.move_id.name)
+        action = self.env["kio.cash.deposit"].action_open_vat_journal_entry(
+            payment.move_id.id
+        )
+        self.assertEqual(action["res_model"], "account.move")
+        self.assertEqual(action["res_id"], payment.move_id.id)
+
+        # Branch Inventory User sees plain text (move_name) with no move_id
+        # and is blocked from opening the Journal Entry via backend RPC.
+        branch_user = self.env["res.users"].create({
+            "name": "VAT History Branch User",
+            "login": "vat_history_branch_user",
+            "groups_id": [
+                Command.set([
+                    self.env.ref("base.group_user").id,
+                    self.env.ref(
+                        "kio_branch_inventory.group_branch_inventory_user"
+                    ).id,
+                ]),
+            ],
+            "kio_cash_deposit_branch_ids": [Command.set(self.branch_a.ids)],
+            "company_ids": [Command.set(self.company.ids)],
+        })
+        user_data = self.env(user=branch_user)[
+            "kio.cash.deposit"
+        ].get_vat_payment_history_data()
+        self.assertFalse(user_data["can_open_journal_entry"])
+        self.assertEqual([r["branch"] for r in user_data["rows"]], ["VAT Cash KPI A"])
+        user_row = user_data["rows"][0]
+        self.assertFalse(user_row["move_id"])
+        self.assertEqual(user_row["move_name"], payment.move_id.name)
+
+        from odoo.exceptions import AccessError
+        with self.assertRaises(AccessError):
+            self.env(user=branch_user)[
+                "kio.cash.deposit"
+            ].action_open_vat_journal_entry(payment.move_id.id)
+
     # ------------------------------------------------------------------
     # Frontend card definition (source-level regression guard)
     # ------------------------------------------------------------------
@@ -316,13 +369,15 @@ class TestVatDashboardCashKpi(TransactionCase):
         self.assertIn("get_vat_payment_history_data", js)
         self.assertIn("return this.state.paymentHistoryRows;", js)
         self.assertIn("openJournalEntry", js)
-        self.assertIn('["name", "=", "view_move_form"]', js)
+        self.assertIn("action_open_vat_journal_entry", js)
         self.assertNotIn("<th>Challan Number</th>", xml)
         self.assertNotIn("<th>Payment Journal</th>", xml)
         self.assertNotIn('<td><t t-esc="row.journal"/></td>', xml)
         self.assertIn("<th>Journal Entry</th>", xml)
+        self.assertIn("row.canOpenJournalEntry and row.moveId", xml)
         self.assertIn("this.openJournalEntry(row.moveId)", xml)
-        self.assertIn('<span t-if="!row.moveId">—</span>', xml)
+        self.assertIn('<span t-elif="row.moveName"><t t-esc="row.moveName"/></span>', xml)
+        self.assertIn('<span t-else="">—</span>', xml)
         self.assertIn("repeat(4, minmax(0, 1fr))", scss)
         self.assertIn("kio-vat-payment__kpi-card--cash", scss)
         self.assertIn("border-top: 3px solid var(--kio-vat-blue)", scss)

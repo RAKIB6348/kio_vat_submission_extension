@@ -766,6 +766,48 @@ class KioCashDeposit(models.Model):
         return self._get_cash_journal_balance(journals, company=company)
 
     @api.model
+    def _can_open_vat_journal_entry(self):
+        """Only administrators may open Journal Entries from the VAT dashboard."""
+        return bool(
+            self.env.su
+            or self.env.user.has_group("base.group_system")
+        )
+
+    @api.model
+    def action_open_vat_journal_entry(self, move_id):
+        """Return the Journal Entry form action for authorized administrators."""
+        self._check_vat_payment_access()
+        if not self._can_open_vat_journal_entry():
+            raise AccessError(_(
+                "You are not authorized to open Journal Entries from the VAT Payment dashboard."
+            ))
+        try:
+            move_id = int(move_id)
+        except (TypeError, ValueError):
+            move_id = False
+        if not move_id:
+            return False
+        payment = self.env["account.payment"].sudo().search([
+            ("is_kio_vat_payment", "=", True),
+            ("move_id", "=", move_id),
+            ("company_id", "in", self.env.companies.ids),
+        ], limit=1)
+        if not payment:
+            raise AccessError(_(
+                "The requested Journal Entry is not an accessible VAT payment entry."
+            ))
+        view = self.env.ref("account.view_move_form", raise_if_not_found=False)
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Journal Entry"),
+            "res_model": "account.move",
+            "view_mode": "form",
+            "views": [[view.id if view else False, "form"]],
+            "res_id": move_id,
+            "target": "current",
+        }
+
+    @api.model
     def get_vat_payment_history_data(
         self, branch_id=False, date_from=False, date_to=False, search=False, limit=100
     ):
@@ -777,6 +819,7 @@ class KioCashDeposit(models.Model):
         caller's authorized branches, so access is still enforced server-side.
         """
         self._check_vat_payment_access()
+        can_open_journal_entry = self._can_open_vat_journal_entry()
         company = self.env.company
         authorized = self._get_authorized_vat_branches()
         if branch_id and str(branch_id) != "all":
@@ -826,10 +869,14 @@ class KioCashDeposit(models.Model):
                 "branch": payment.kio_vat_branch_id.name or "",
                 "amount": amount,
                 "journal": payment.journal_id.code or payment.journal_id.name or "",
-                "move_id": move.id or False,
+                "move_id": (move.id or False) if can_open_journal_entry else False,
                 "move_name": move.name or "",
                 # Kept in the payload; no challan field is configured yet.
                 "challan": "",
                 "status": status_labels.get(payment.state, payment.state or ""),
             })
-        return {"rows": rows, "total_count": len(rows)}
+        return {
+            "rows": rows,
+            "total_count": len(rows),
+            "can_open_journal_entry": can_open_journal_entry,
+        }

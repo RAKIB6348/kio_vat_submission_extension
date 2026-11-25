@@ -111,6 +111,7 @@ export class VatPaymentPage extends Component {
                 [],
                 params
             );
+            const canOpenJournalEntry = Boolean(history && history.can_open_journal_entry);
             const historyRows = Array.isArray(history && history.rows) ? history.rows : [];
             this.state.paymentHistoryRows = historyRows.map((row, index) => ({
                 key: `payment_${index}`,
@@ -119,8 +120,9 @@ export class VatPaymentPage extends Component {
                 branch: row.branch || "",
                 amount: row.amount || "",
                 journal: row.journal || "",
-                moveId: row.move_id || false,
+                moveId: canOpenJournalEntry ? (row.move_id || false) : false,
                 moveName: row.move_name || "",
+                canOpenJournalEntry,
                 challan: row.challan || "",
                 status: row.status || "",
             }));
@@ -209,25 +211,14 @@ export class VatPaymentPage extends Component {
         if (!moveId) {
             return;
         }
-        const data = await this.orm.searchRead(
-            "ir.model.data",
-            [
-                ["module", "=", "account"],
-                ["name", "=", "view_move_form"],
-            ],
-            ["res_id"],
-            { limit: 1 }
+        const action = await this.orm.call(
+            "kio.cash.deposit",
+            "action_open_vat_journal_entry",
+            [moveId]
         );
-        const viewId = data && data.length ? data[0].res_id : false;
-        await this.action.doAction({
-            type: "ir.actions.act_window",
-            name: "Journal Entry",
-            res_model: "account.move",
-            view_mode: "form",
-            views: [[viewId || false, "form"]],
-            res_id: moveId,
-            target: "current",
-        });
+        if (action) {
+            await this.action.doAction(action);
+        }
     }
 
     generateIdempotencyKey() {

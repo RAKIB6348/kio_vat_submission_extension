@@ -309,9 +309,16 @@ The dashboard's **Journal Entry** cell uses the existing linked
 `account.payment.move_id` (and `move.name`). It does not create a new journal
 entry.
 
-Clicking the reference opens the standard Journal Entry form
-(`account.view_move_form`) for that move in the current window. If the payment
-has no linked move, the cell shows `—` and is not clickable.
+- **Administrators (`base.group_system`):** Clicking the reference calls
+  `kio.cash.deposit.action_open_vat_journal_entry(move_id)` and opens the
+  standard Journal Entry form (`account.view_move_form`) for that move in the
+  current window.
+- **Branch Inventory Users (`kio_branch_inventory.group_branch_inventory_user`):**
+  The Journal Entry reference (`move_name`) is displayed as plain,
+  non-clickable text. `get_vat_payment_history_data()` omits `move_id`
+  (`False`) and sets `can_open_journal_entry = False`, and direct RPC calls to
+  `action_open_vat_journal_entry()` raise `AccessError` on the backend.
+- If the payment has no linked move, the cell shows `—` and is not clickable.
 
 ### 2.11 Automatic dashboard refresh
 

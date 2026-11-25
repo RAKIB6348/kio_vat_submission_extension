@@ -183,7 +183,7 @@
                                         <td class="is-money"><t t-esc="row.amount"/></td>
                                         <td>
                                             <button
-                                                t-if="row.moveId"
+                                                t-if="row.canOpenJournalEntry and row.moveId"
                                                 type="button"
                                                 class="kio-vat-payment__entry-link"
                                                 title="Open Journal Entry"
@@ -191,7 +191,8 @@
                                             >
                                                 <t t-esc="row.moveName"/>
                                             </button>
-                                            <span t-if="!row.moveId">—</span>
+                                            <span t-elif="row.moveName"><t t-esc="row.moveName"/></span>
+                                            <span t-else="">—</span>
                                         </td>
                                         <td><t t-esc="row.status"/></td>
                                     </tr>
