@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!--
+            Branch Inventory User can read/create VAT payments only for their
+            assigned Cash Deposit branches (res.users.kio_cash_deposit_branch_ids),
+            in the current company.
+
+            The backend validation (_validate_kio_vat_payment and
+            _check_kio_vat_payment_marking) enforces the same branch rule at
+            the model level, so a payment can only be created for an
+            authorized branch. Posted payments additionally remain protected by
+            the account.payment write/unlink/cancel/draft guards in this
+            module, independent of any ACL.
+
+            A user without any assigned branch matches no record ('id = 0'),
+            so they can neither read nor create VAT payments.
+        -->
+        <record id="rule_account_payment_branch_inventory_user" model="ir.rule">
+            <field name="name">Branch Inventory User: Assigned Branch VAT Payments Only</field>
+            <field name="model_id" ref="account.model_account_payment"/>
+            <field name="groups" eval="[(4, ref('kio_branch_inventory.group_branch_inventory_user'))]"/>
+            <field name="domain_force">
+                [('id', '!=', 0)] if user.has_group('base.group_system') else (
+                    [('company_id', 'in', user.company_ids.ids), ('kio_vat_branch_id', 'in', user.kio_cash_deposit_branch_ids.ids)]
+                    if user.kio_cash_deposit_branch_ids else [('id', '=', 0)]
+                )
+            </field>
+            <field name="perm_read" eval="1"/>
+            <field name="perm_write" eval="0"/>
+            <field name="perm_create" eval="1"/>
+            <field name="perm_unlink" eval="0"/>
+        </record>
+
+    </data>
+</odoo>

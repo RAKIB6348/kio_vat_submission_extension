@@ -1240,15 +1240,22 @@ balance, but the total/KPI deduplicates the shared journal.
 
 ### 8.1 Security groups used
 
-This module **does not define new security groups, ACL rows or record rules**.
-It reuses the existing Odoo and branch inventory groups, and retains the
-cash-deposit branch assignments to scope the dashboard data:
+This module **does not define new security groups**. It reuses the existing Odoo
+and branch inventory groups. It **does** define the ACL rows and the record rule
+needed to scope Branch Inventory User access to their assigned branches:
+
+| File | Purpose |
+| --- | --- |
+| `security/ir.model.access.csv` | Grants Branch Inventory User read access to `ir.model.data` (fixes the client-side `ir.model.data` AccessError when opening the wizard or a journal entry), and read/create access to `account.payment`, `account.move`, `account.move.line` and `account.payment.register` so the VAT payment workflow can run as the user. |
+| `security/ir.rule.xml` | Record rule on `account.payment`: Branch Inventory User can only read/create VAT payments for their assigned Cash Deposit branches (`res.users.kio_cash_deposit_branch_ids`), in the current company. A user without an assigned branch matches no record. |
+
+It retains the cash-deposit branch assignments to scope the dashboard data:
 
 | Group | Technical id | Source | Meaning here |
 | --- | --- | --- | --- |
 | Administrator | `base.group_system` | Odoo base | Can access the menu and RPCs; sees active branches in the current company |
 | Branch Inventory User | `kio_branch_inventory.group_branch_inventory_user` | `kio_branch_inventory` | Can access the menu and RPCs; branch results remain scoped to the user's assigned Cash Deposit branches |
-| Cash Deposit Manager | `kio_cash_deposit.group_kio_cash_deposit_user` | `kio_cash_deposit` | Supplies existing branch assignments used to scope Branch Inventory User dashboard data |
+| Cash Deposit Manager | `kio_cash_deposit.group_kio_cash_deposit_user` | `kio_cash_deposit` | Supplies existing branch assignments used to scope Branch Inventory User dashboard data; keeps pre-existing Payment History access |
 | Billing / Accounting | `account.group_account_invoice` | Odoo accounting | Needed for standard `account.payment` create/post rights in many setups |
 
 ### 8.2 Capability matrix
@@ -1256,11 +1263,11 @@ cash-deposit branch assignments to scope the dashboard data:
 | Capability | Administrator | Branch Inventory User | Other users |
 | --- | --- | --- | --- |
 | Open VAT Payment menu | Yes | Yes | No menu; RPC raises AccessError |
-| View dashboard KPIs | Assigned branches | All active branches in current company | No |
-| View Branch-wise Summary | Assigned branches | All active branches | No |
-| View Payment History | Assigned branches | All active branches | No |
-| Select a branch in the wizard | Only assigned | Any active branch in company | No |
-| Create/post a VAT payment | Only if accounting payment rights are also granted | Only if accounting payment rights are also granted | No |
+| View dashboard KPIs | All active branches in current company | Assigned branches | No |
+| View Branch-wise Summary | All active branches | Assigned branches | No |
+| View Payment History | All active branches | Assigned branches | No |
+| Select a branch in the wizard | Any active branch in company | Only assigned | No |
+| Create/post a VAT payment | Only if accounting payment rights are also granted | Only if accounting payment rights are also granted, and only for assigned branches | No |
 | Configure branch cash journals | Yes, subject to base ACL | Subject to base ACL | No VAT dashboard access |
 | Mark an arbitrary payment as VAT | Subject to existing payment authorization | Subject to existing payment authorization | No VAT dashboard access |
 | Cancel/delete a posted VAT payment | No | No | No |
@@ -1270,9 +1277,20 @@ cash-deposit branch assignments to scope the dashboard data:
 
 The menus are only the first layer. The server enforces:
 
-- `_check_vat_payment_access()` at the start of every VAT dashboard/history RPC and before VAT payment creation. It allows only `base.group_system` and `kio_branch_inventory.group_branch_inventory_user`.
-- `_kio_vat_authorized_branches()` in payment marking constraints and history
-  scoping.
+- `security/ir.model.access.csv`: grants Branch Inventory User read access to
+  `ir.model.data` (fixes the client-side `ir.model.data` AccessError raised when
+  the wizard or a journal entry is opened), and read/create access to
+  `account.payment`, `account.move`, `account.move.line` and
+  `account.payment.register` so the VAT payment workflow can run as the user.
+- `security/ir.rule.xml`: record rule on `account.payment` scoping Branch
+  Inventory User reads and creates to their assigned Cash Deposit branches in
+  the current company.
+- `_check_vat_payment_access()` at the start of every VAT dashboard/history RPC
+  and before VAT payment creation. It allows only `base.group_system` and
+  `kio_branch_inventory.group_branch_inventory_user`.
+- `_get_authorized_vat_branches()` / `_kio_vat_authorized_branches()` in payment
+  marking constraints and history scoping. Payment History also accepts Cash
+  Deposit Manager access so pre-existing manager access is preserved.
 - `_validate_kio_vat_payment()` immediately before posting.
 - `_search()` history scoping whenever the history context is present.
 - `_check_kio_vat_payment_marking()` on create/write of VAT markers.
@@ -1281,7 +1299,31 @@ The menus are only the first layer. The server enforces:
 A client cannot bypass menu access or branch/company restrictions by editing the action
 domain, the wizard fields or the RPC arguments.
 
-### 8.4 Record rules inherited from `kio_cash_deposit`
+### 8.4 ir.model.data Access Error fix
+
+The Register Payment wizard (`openNewPayment`) and the clickable Journal Entry
+(`openJournalEntry`) resolve view ids through a client-side
+`orm.searchRead("ir.model.data", ...)`. The `kio_branch_inventory.group_branch_inventory_user`
+group implies neither `base.group_user` nor `base.group_system`, so it had no
+read access to `ir.model.data` and opening the wizard or a journal entry raised
+an `ir.model.data` AccessError.
+
+The fix (`security/ir.model.access.csv`) grants that group read access to
+`ir.model.data` only — it does **not** grant `base.group_system` or any
+administrative permissions.
+
+### 8.5 Automatic branch selection in the New Payment wizard
+
+When a dashboard user opens New Payment without explicitly selecting a branch in
+the branch filter, the wizard (`account_payment_register.default_get`)
+automatically selects the user's assigned branch when they have exactly one
+authorized branch (for example, a Branch Inventory User with one assigned Cash
+Deposit branch). The branch's configured cash journal, Manual outbound method,
+memo and outstanding-VAT amount are then initialized exactly as with an
+interactive branch selection. Users with several assigned branches, and
+administrators with all branches, choose the branch explicitly.
+
+### 8.6 Record rules inherited from `kio_cash_deposit`
 
 - Cash Deposit managers are restricted to their assigned branches for the
   `kio.cash.deposit` and `kio.cash.deposit.branch` models.
@@ -1289,10 +1331,11 @@ domain, the wizard fields or the RPC arguments.
 - The VAT dashboard uses these rules indirectly and additionally filters its
   results explicitly.
 
-### 8.5 Standard accounting rules
+### 8.7 Standard accounting rules
 
 - `account.payment`, `account.move` and `account.move.line` keep their standard
-  ACLs and multi-company rules.
+  ACLs and multi-company rules; the module additionally grants Branch Inventory
+  User the rights needed to create VAT payments (`security/ir.model.access.csv`).
 - The VAT workflow does not use `sudo` to bypass payment creation rights.
 - `_get_cash_journal_balance()` and branch lookups use `sudo` only for
   read-side aggregation, with explicit company/branch filtering.
@@ -1413,9 +1456,13 @@ workflow that is intentionally not implemented.
 
 ### 10.5 User permissions
 
-- Add operational users to **Cash Deposit → Manager**.
-- Assign their branches in the user form (`Cash Deposit Branch`).
-- Grant the accounting rights required to create and post payments.
+- Add Branch Inventory Users to **Branch Inventory → User** and assign their
+  Cash Deposit branches in the user form (`Cash Deposit Branch`). The assigned
+  branches drive both the Payment History scope and the New Payment wizard
+  preselection. A user without an assigned branch can view/create nothing.
+- Add operational users to **Cash Deposit → Manager** and assign their branches.
+- Grant the accounting rights required to create and post payments to users who
+  create VAT payments (Branch Inventory Users and Cash Deposit Managers alike).
 - Add administrators to **Cash Deposit → Admin**.
 - Do not grant `account.payment` create rights to users who should only view the
   dashboard.
@@ -1487,6 +1534,12 @@ kio_vat_submission_extension/
 │   ├── cash_deposit.py
 │   ├── account_payment_register.py
 │   └── account_payment.py
+├── security/
+│   ├── ir.model.access.csv   (Branch Inventory User ACLs: ir.model.data read,
+│   │                          account.payment/account.move/account.move.line /
+│   │                          account.payment.register read/create/write)
+│   └── ir.rule.xml           (Branch Inventory User account.payment branch-scoped
+│                              record rule)
 ├── views/
 │   ├── vat_payment_views.xml
 │   ├── payment_history_views.xml
@@ -1521,9 +1574,11 @@ Phase 3 accounting design and verification.
 
 | File | Model | Responsibility |
 | --- | --- | --- |
-| `models/cash_deposit.py` | `kio.cash.deposit` (inherit) | Sales/VAT KPI FIFO, VAT payable account resolution, authorized branches, POS-to-branch mapping, VAT summary, cash KPI, payment history RPC, settlement recognition |
-| `models/account_payment_register.py` | `account.payment.register` (inherit) | Dashboard-only wizard initialization, branch→journal/method selection, warnings, server validation, idempotent creation/posting, success action |
+| `models/cash_deposit.py` | `kio.cash.deposit` (inherit) | Sales/VAT KPI FIFO, VAT payable account resolution, authorized branches, POS-to-branch mapping, VAT summary, cash KPI, payment history RPC, settlement recognition, branch access gates |
+| `models/account_payment_register.py` | `account.payment.register` (inherit) | Dashboard-only wizard initialization, branch→journal/method selection, warnings, server validation, idempotent creation/posting, success action, automatic assigned-branch preselection |
 | `models/account_payment.py` | `account.payment` (inherit) | VAT marker/branch/key fields, marking constraints, VAT destination account, journal-item labels, posted-payment protection, history `_search()` scoping |
+| `security/ir.model.access.csv` | — | Branch Inventory User ACLs: `ir.model.data` read (AccessError fix), `account.payment`/`account.move`/`account.move.line`/`account.payment.register` read/create/write |
+| `security/ir.rule.xml` | — | Branch Inventory User `account.payment` record rule scoped to assigned Cash Deposit branches |
 
 ### 11.3 Important fields
 
@@ -1966,6 +2021,8 @@ payments, sessions, configs).
 Data files:
 
 ```text
+security/ir.model.access.csv
+security/ir.rule.xml
 views/vat_payment_views.xml
 views/payment_history_views.xml
 views/account_payment_register_views.xml

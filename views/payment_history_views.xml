@@ -37,6 +37,6 @@
         parent="kio_cash_deposit.menu_kio_cash_deposit_root"
         action="action_kio_vat_payment_history"
         sequence="7"
-        groups="kio_cash_deposit.group_kio_cash_deposit_user"
+        groups="kio_cash_deposit.group_kio_cash_deposit_user,kio_branch_inventory.group_branch_inventory_user"
     />
 </odoo>

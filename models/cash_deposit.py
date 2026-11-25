@@ -417,8 +417,19 @@ class KioCashDeposit(models.Model):
         Mirrors cash-deposit dashboard access semantics:
         - admin: all active branches in current company (optionally filtered),
         - manager: assigned active branches in current company only.
+
+        The VAT Payment dashboard and wizard gate on _check_vat_payment_access
+        (administrators and Branch Inventory Users). The Payment History search
+        is also used by Cash Deposit Managers, so this service accepts either
+        VAT Payment access or Cash Deposit access when deriving the authorized
+        branch universe.
         """
-        self._check_vat_payment_access()
+        # VAT Payment (administrator / Branch Inventory User) or Cash Deposit
+        # (manager) access is required to derive the authorized branch universe.
+        try:
+            self._check_vat_payment_access()
+        except AccessError:
+            self._check_cash_deposit_access()
         company = self.env.company
         Branch = self.env["kio.cash.deposit.branch"].sudo()
         company_domain = [("active", "=", True), ("company_id", "=", company.id)]

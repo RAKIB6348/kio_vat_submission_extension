@@ -26,6 +26,8 @@ existing card design is reused.
         "kio_branch_inventory",
     ],
     "data": [
+        "security/ir.model.access.csv",
+        "security/ir.rule.xml",
         "views/vat_payment_views.xml",
         "views/payment_history_views.xml",
         "views/account_payment_register_views.xml",

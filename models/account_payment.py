@@ -7,7 +7,7 @@
 # standalone journal entry.
 
 from odoo import _, api, fields, models
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.osv import expression
 
 
@@ -198,15 +198,23 @@ class AccountPayment(models.Model):
         The browser cannot be trusted to keep the action domain intact, so the
         branch/company restrictions are re-applied server-side whenever the
         explicit history context flag is present.
+
+        Access is granted to system administrators and Branch Inventory Users
+        (VAT Payment features) through _check_vat_payment_access, and to Cash
+        Deposit Managers through their pre-existing _check_cash_deposit_access,
+        so no authorized user is locked out by the other check.
         """
-        self.env["kio.cash.deposit"]._check_cash_deposit_access()
+        try:
+            self.env["kio.cash.deposit"]._check_vat_payment_access()
+        except AccessError:
+            self.env["kio.cash.deposit"]._check_cash_deposit_access()
         domain = [
             ("is_kio_vat_payment", "=", True),
             ("company_id", "in", self.env.companies.ids),
         ]
         # Admins see all VAT payments of their allowed companies (the core
-        # account.payment company rule applies as well). Managers are limited
-        # to the branches assigned to them.
+        # account.payment company rule applies as well). Managers and Branch
+        # Inventory Users are limited to the branches assigned to them.
         if not self.env.user.has_group("kio_cash_deposit.group_kio_cash_deposit_admin"):
             allowed_branches = self._kio_vat_authorized_branches(
                 company=self.env.company

@@ -115,6 +115,10 @@ class AccountPaymentRegister(models.TransientModel):
             res = models.TransientModel.default_get(self, fields_list)
             company = self.env.company
             currency = company.currency_id
+            # Branches the user may select in the dashboard flow. Used both to
+            # validate an explicitly requested branch and to preselect the user's
+            # assigned branch when none is requested.
+            authorized = self._get_vat_payment_authorized_branches(company=company)
             branch = False
             branch_id = self.env.context.get("default_kio_vat_branch_id") or self.env.context.get(
                 "kio_vat_branch_id"
@@ -124,9 +128,14 @@ class AccountPaymentRegister(models.TransientModel):
                     branch_id = int(branch_id)
                 except (TypeError, ValueError):
                     branch_id = False
-            authorized = self._get_vat_payment_authorized_branches(company=company)
-            if branch_id:
                 branch = authorized.filtered(lambda b: b.id == branch_id)[:1]
+            # Automatically select the user's assigned branch when none is
+            # explicitly requested, e.g. a Branch Inventory User opening New
+            # Payment from the "All Branches" view. A user with a single
+            # assigned branch gets it preselected; users with several assigned
+            # branches (or administrators with all branches) choose explicitly.
+            elif len(authorized) == 1:
+                branch = authorized[:1]
             amount = self._get_vat_branch_outstanding_amount(
                 branch, company, currency, res.get("payment_date")
             )

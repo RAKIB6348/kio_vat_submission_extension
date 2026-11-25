@@ -1,0 +1,6 @@
+"id","name","model_id:id","group_id:id","perm_read","perm_write","perm_create","perm_unlink"
+access_kio_vat_ir_model_data_branch_inventory_user,"VAT Payment: read ir.model.data for Branch Inventory User",base.model_ir_model_data,kio_branch_inventory.group_branch_inventory_user,1,0,0,0
+access_kio_vat_account_payment_branch_inventory_user,"VAT Payment: read/create account.payment for Branch Inventory User",account.model_account_payment,kio_branch_inventory.group_branch_inventory_user,1,0,1,0
+access_kio_vat_account_move_branch_inventory_user,"VAT Payment: read/create/write account.move for Branch Inventory User",account.model_account_move,kio_branch_inventory.group_branch_inventory_user,1,1,1,0
+access_kio_vat_account_move_line_branch_inventory_user,"VAT Payment: read/create account.move.line for Branch Inventory User",account.model_account_move_line,kio_branch_inventory.group_branch_inventory_user,1,0,1,0
+access_kio_vat_account_payment_register_branch_inventory_user,"VAT Payment: read/create/write account.payment.register for Branch Inventory User",account.model_account_payment_register,kio_branch_inventory.group_branch_inventory_user,1,1,1,0
