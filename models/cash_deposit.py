@@ -207,6 +207,33 @@ class KioCashDeposit(models.Model):
         ])
         pos_receipt_move_ids = statement_lines.mapped("move_id").ids
 
+        # Identify approved Cash Deposit journal entries (manual and
+        # POS-session based) so their credit lines are excluded from the
+        # generic outflow list. Deposits relocate cash; they are handled
+        # separately below and must only reduce Total Sales Amount, never
+        # Total VAT.
+        deposit_move_ids = []
+        deposit_records = self.env["kio.cash.deposit"].sudo().search([
+            ("company_id", "=", company.id),
+            ("state", "=", "done"),
+            ("journal_entry_id", "!=", False),
+        ])
+        for deposit in deposit_records:
+            move = deposit.journal_entry_id
+            if not move or move.state != "posted":
+                continue
+            if move.reversal_move_id and move.reversal_move_id.state == "posted":
+                continue
+            if deposit.pos_session_id:
+                deposit_journal = deposit.pos_session_id.cash_journal_id
+            else:
+                deposit_journal = deposit.from_account_journal_id
+            if (deposit_journal and deposit_journal in cash_journals
+                    and (not move.date or move.date <= end_of_today.date())):
+                deposit_move_ids.append(move.id)
+
+        excluded_move_ids = list(set(pos_receipt_move_ids + deposit_move_ids))
+
         # Opening balances: debits to coverage accounts that are NOT POS
         # sales receipt moves. These are non-sales cash inflows.
         opening_lines = self.env["account.move.line"].sudo().search([
@@ -216,7 +243,7 @@ class KioCashDeposit(models.Model):
             ("parent_state", "!=", "cancel"),
             ("debit", ">", 0),
             ("date", "<=", end_of_today.date()),
-            ("move_id", "not in", pos_receipt_move_ids),
+            ("move_id", "not in", excluded_move_ids),
         ], order="date, id")
 
         opening_inflows = [
@@ -235,7 +262,7 @@ class KioCashDeposit(models.Model):
             ("parent_state", "!=", "cancel"),
             ("credit", ">", 0),
             ("date", "<=", end_of_today.date()),
-            ("move_id", "not in", pos_receipt_move_ids),
+            ("move_id", "not in", excluded_move_ids),
         ], order="date, id")
 
         outflows = refund_outflows + [
@@ -326,6 +353,40 @@ class KioCashDeposit(models.Model):
         return remaining_sales_cash, total_sales, total_vat
 
     @api.model
+    def _get_kpi_deposit_total(self, cash_journals, company, end_of_today):
+        """Return the total amount of approved, posted Cash Deposits that
+        affect the given coverage cash journals.
+
+        Manual deposits (``journal_entry_id``) and POS-session deposits
+        (``pos_statement_line_id``) are both covered through the deposit's
+        linked ``journal_entry_id``. Cancelled or reversed deposits are
+        excluded. The result is used to reduce Total Sales Amount only.
+        """
+        deposits = self.env["kio.cash.deposit"].sudo().search([
+            ("company_id", "=", company.id),
+            ("state", "=", "done"),
+            ("journal_entry_id", "!=", False),
+            ("date", "<=", end_of_today.date()),
+        ])
+        total = 0.0
+        for deposit in deposits:
+            move = deposit.journal_entry_id
+            if not move or move.state != "posted":
+                continue
+            if move.reversal_move_id and move.reversal_move_id.state == "posted":
+                continue
+            if deposit.pos_session_id:
+                deposit_journal = deposit.pos_session_id.cash_journal_id
+            else:
+                deposit_journal = deposit.from_account_journal_id
+            if not deposit_journal or deposit_journal not in cash_journals:
+                continue
+            if deposit_journal.company_id != company:
+                continue
+            total += deposit.amount or 0.0
+        return total
+
+    @api.model
     def _get_sales_and_vat_kpis(self, selected_branches=None, is_admin=False):
         """Return the (total_sales, total_vat) dashboard KPI pair.
 
@@ -362,6 +423,19 @@ class KioCashDeposit(models.Model):
             flows["opening_inflows"],
             flows["outflows"],
         )
+
+        # Approved Cash Deposits relocate cash to a bank account: they reduce
+        # Total Sales Amount only, never Total VAT. The deposit amounts are
+        # therefore deducted from Total Sales Amount after the normal FIFO
+        # allocation (which already excludes deposit move lines from its
+        # outflows). Deposits are capped at the available Sales Amount; any
+        # excess is ignored (reported as an edge case) and never deducted
+        # from VAT.
+        deposit_total = self._get_kpi_deposit_total(
+            cash_journals, company, end_of_today
+        )
+        if deposit_total and total_sales:
+            total_sales = max(total_sales - deposit_total, 0.0)
 
         return total_sales, total_vat
 

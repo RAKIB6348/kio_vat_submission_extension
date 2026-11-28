@@ -723,9 +723,15 @@ Cash inflows are:
 
 Cash outflows are:
 
-- non-POS credits to the coverage cash accounts (deposits, transfers, expenses,
-  refunds paid in cash),
+- non-POS credits to the coverage cash accounts, excluding approved Cash
+  Deposit entries (transfers, expenses, VAT payments, refunds paid in cash),
 - negative POS cash payments (refunds).
+
+Approved Cash Deposits are identified through the `kio.cash.deposit` relational
+records (manual deposits via `journal_entry_id`, POS-session deposits via
+`pos_statement_line_id`). They are excluded from the generic outflow list and
+are instead deducted from **Total Sales Amount only** after the FIFO allocation.
+They never reduce **Total VAT**. Cancelled or reversed deposits are excluded.
 
 POS accounting moves are excluded from the opening/outflow line sets using the
 move ids of statement lines linked to POS sessions, so they are not counted
@@ -745,7 +751,7 @@ sales layer:
 ```text
 f_o = remaining_cash_o / cash_paid_o
 
-Total Sales Amount = Σ sales_layer_o × f_o
+Total Sales Amount = Σ sales_layer_o × f_o  −  approved deposit total (capped at available Sales Amount)
 Total VAT          = Σ vat_layer_o  × f_o
 ```
 
